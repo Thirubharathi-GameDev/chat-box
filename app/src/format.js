@@ -1,3 +1,8 @@
+export function partnerTitle(partner) {
+  const nickname = partner?.nickname?.trim();
+  return nickname || partner?.displayName || 'Chat';
+}
+
 export function initial(name) {
   const trimmed = (name || '?').trim();
   return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
@@ -35,6 +40,18 @@ export function durationLabel(ms) {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function presenceLabel({ online, typing, activity, lastSeenAt }) {
+  if (activity === 'recording') return 'recording audio…';
+  if (activity === 'typing' || typing) return 'typing…';
+  if (online) return 'online';
+  if (!lastSeenAt) return '';
+  const day = dayLabel(lastSeenAt);
+  const time = timeLabel(lastSeenAt);
+  if (day === 'Today') return `last seen today at ${time}`;
+  if (day === 'Yesterday') return `last seen yesterday at ${time}`;
+  return `last seen ${day} at ${time}`;
 }
 
 export function previewLabel(message) {

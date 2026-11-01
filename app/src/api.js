@@ -26,6 +26,14 @@ export async function api(path, { token, method = 'GET', body, form } = {}) {
   return data;
 }
 
+export async function uploadProfilePhoto(token, uri) {
+  const name = uri.split('/').pop()?.split('?')[0] || 'profile.jpg';
+  const type = name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const form = new FormData();
+  form.append('file', { uri, name, type });
+  return api('/api/me/photo', { token, method: 'POST', form });
+}
+
 export async function uploadMedia(token, uri, kind) {
   const name = uri.split('/').pop()?.split('?')[0] || (kind === 'image' ? 'photo.jpg' : 'voice.m4a');
   const type = kind === 'image' ? (name.endsWith('.png') ? 'image/png' : 'image/jpeg') : 'audio/mp4';

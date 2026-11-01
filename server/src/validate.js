@@ -26,3 +26,14 @@ export function assertDisplayName(value) {
   }
   return name;
 }
+
+export function assertNickname(value) {
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'Enter a nickname.');
+  }
+  const name = value.trim();
+  if (name.length > 40) {
+    throw new HttpError(400, 'Nickname must be 40 characters or less.');
+  }
+  return name;
+}

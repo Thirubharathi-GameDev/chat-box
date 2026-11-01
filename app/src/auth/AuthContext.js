@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { setAppBadge } from '../notifications';
 import { api } from '../api';
 
 const TOKEN_KEY = 'chatbox.token';
@@ -54,8 +55,15 @@ export function AuthProvider({ children }) {
         const data = await api('/api/me', { token, method: 'PATCH', body: { displayName } });
         setUser(data.user);
       },
+      applyUser(nextUser) {
+        setUser(nextUser);
+      },
       async logout() {
+        if (token) {
+          await api('/api/me/push-token', { token, method: 'POST', body: { token: '' } }).catch(() => {});
+        }
         await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+        setAppBadge(0);
         setToken(null);
         setUser(null);
       },

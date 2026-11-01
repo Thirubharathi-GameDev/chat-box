@@ -15,6 +15,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function waitFor(emitter, event, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    emitter.once(event, (payload) => {
+      clearTimeout(timer);
+      resolve(payload);
+    });
+  });
+}
+
 await connectDb();
 const { server } = createServer();
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -133,11 +143,60 @@ try {
   const event = await received;
   assert(event.message.text === 'Hello 😊', 'partner did not receive the text');
   assert(event.clientId === 'c1', 'client id was not echoed');
+  assert(ack.message.status === 'delivered', `expected a double tick, got ${ack.message.status}`);
+
+  const readReceipt = waitFor(socketA, 'message:status', 3000, 'read receipt was not sent');
+  socketB.emit('chat:open', { conversationId: paired.data.conversation.id });
+  const receipt = await readReceipt;
+  assert(receipt.status === 'read', 'opened chat should turn the tick blue');
+  assert(receipt.messageIds.includes(ack.message.id), 'read receipt missed the message');
+
+  const quoted = waitFor(socketB, 'message:new', 3000, 'reply was not delivered');
+  const replyAck = await new Promise((resolve) => {
+    socketA.emit(
+      'message:send',
+      {
+        conversationId: paired.data.conversation.id,
+        clientId: 'c2',
+        type: 'text',
+        text: 'Replying',
+        replyTo: ack.message.id,
+      },
+      resolve
+    );
+  });
+  assert(replyAck.ok, `reply failed: ${replyAck.error}`);
+  assert(replyAck.message.status === 'read', 'an open chat should get a blue tick immediately');
+  assert(replyAck.message.replyTo?.text === 'Hello 😊', 'reply was not tagged');
+  const quotedEvent = await quoted;
+  assert(quotedEvent.message.replyTo?.messageId === ack.message.id, 'partner did not get the tag');
+
+  const away = waitFor(socketA, 'presence', 3000, 'background did not update last seen');
+  socketB.emit('app:foreground', { active: false });
+  const awayEvent = await away;
+  assert(awayEvent.online === false, 'a background app should not stay online');
+
+  const back = waitFor(socketA, 'presence', 3000, 'returning to the app did not show online');
+  socketB.emit('app:foreground', { active: true });
+  const backEvent = await back;
+  assert(backEvent.online === true, 'the open app should show online');
+
+  const typing = waitFor(socketB, 'typing', 3000, 'typing was not relayed');
+  socketA.emit('typing', { conversationId: paired.data.conversation.id, active: true });
+  const typingEvent = await typing;
+  assert(typingEvent.active === true, 'typing flag missing');
+
+  const presence = waitFor(socketA, 'presence', 3000, 'last seen was not sent');
+  socketB.disconnect();
+  const seen = await presence;
+  assert(seen.online === false && seen.lastSeenAt, 'partner should go offline with a last seen time');
 
   const history = await request(`/api/conversation/${paired.data.conversation.id}/messages`, {
     token: ben.data.token,
   });
-  assert(history.data.messages.length === 1, 'history missing');
+  assert(history.data.messages.length === 2, 'history missing');
+  assert(history.data.messages[0].status === 'read', 'saved message should be read');
+  assert(history.data.messages[1].replyTo?.text === 'Hello 😊', 'saved reply lost its tag');
   assert(history.data.hasMore === false, 'hasMore should be false');
 
   const outsider = await request(`/api/conversation/${paired.data.conversation.id}/messages`, {

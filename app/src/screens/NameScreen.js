@@ -1,20 +1,14 @@
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
-import { colors } from '../theme';
+import { Eyebrow, Field, PrimaryButton } from '../components/Field';
+import { font, useColors } from '../theme';
+import { KeyboardScreen } from '../useKeyboardInset';
 
 export function NameScreen() {
   const { saveName, logout } = useAuth();
+  const colors = useColors();
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,97 +26,37 @@ export function NameScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.inner}>
-          <Text style={styles.kicker}>Almost there</Text>
-          <Text style={styles.title}>What should we call you?</Text>
-          <Text style={styles.help}>This name is what the other person sees in the chat. Nothing else is asked.</Text>
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Your name"
-            placeholderTextColor={colors.muted}
-            style={styles.input}
-            maxLength={40}
-            autoFocus
-          />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <Pressable style={styles.button} onPress={submit} disabled={busy}>
-            {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Continue</Text>}
-          </Pressable>
-          <Pressable onPress={logout} style={styles.logout}>
-            <Text style={styles.logoutText}>Log out</Text>
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+    <KeyboardScreen style={{ backgroundColor: colors.header }}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}>
+          <View style={{ paddingHorizontal: 28, paddingTop: 48, paddingBottom: 28 }}>
+            <Eyebrow light>Almost there</Eyebrow>
+            <Text style={{ color: colors.onHeader, fontFamily: font.bold, fontSize: 36, letterSpacing: -0.6 }}>
+              What should we call you?
+            </Text>
+          </View>
+          <View
+            style={{
+              backgroundColor: colors.background,
+              borderTopLeftRadius: 32,
+              borderTopRightRadius: 32,
+              paddingHorizontal: 22,
+              paddingTop: 26,
+              paddingBottom: 32,
+            }}
+          >
+            <Text style={{ color: colors.muted, fontFamily: font.medium, lineHeight: 22, marginBottom: 18 }}>
+              This is the name the other person sees. You can change it later.
+            </Text>
+            <Field value={name} onChangeText={setName} placeholder="Your name" maxLength={40} autoFocus />
+            {error ? <Text style={{ color: colors.danger, fontFamily: font.medium, marginBottom: 10 }}>{error}</Text> : null}
+            <PrimaryButton label="Continue" onPress={submit} busy={busy} />
+            <Pressable onPress={logout} style={{ marginTop: 18, alignItems: 'center' }}>
+              <Text style={{ color: colors.muted, fontFamily: font.semibold }}>Log out</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </KeyboardScreen>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.header,
-  },
-  flex: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  inner: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    paddingBottom: 36,
-  },
-  kicker: {
-    color: colors.teal,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  help: {
-    color: colors.muted,
-    marginTop: 8,
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  input: {
-    backgroundColor: colors.composer,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 18,
-    color: colors.text,
-  },
-  error: {
-    color: colors.danger,
-    marginTop: 10,
-  },
-  button: {
-    marginTop: 18,
-    backgroundColor: colors.green,
-    borderRadius: 24,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonText: {
-    color: colors.white,
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  logout: {
-    marginTop: 18,
-    alignItems: 'center',
-  },
-  logoutText: {
-    color: colors.muted,
-    fontWeight: '700',
-  },
-});

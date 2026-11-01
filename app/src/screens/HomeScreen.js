@@ -1,19 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
+import { Avatar } from '../components/Avatar';
+import { PrimaryButton } from '../components/Field';
 import { Header } from '../components/Header';
 import { PairModal } from '../components/PairModal';
-import { initial, listTime, previewLabel } from '../format';
+import { listTime, partnerTitle, presenceLabel, previewLabel } from '../format';
 import { useChat } from '../state/ChatContext';
-import { colors } from '../theme';
+import { font, useColors } from '../theme';
 
 export function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const styles = useMemo(() => makeHomeStyles(colors), [colors]);
   const { token, user, logout } = useAuth();
-  const { conversation, conversationReady, socket, connected, setConversation } = useChat();
+  const { conversation, conversationReady, socket, connected, setConversation, draft, partnerActivity, refreshConversation } = useChat();
   const [pairOpen, setPairOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const openChat = useRef(false);
 
   useEffect(() => {
@@ -33,6 +39,12 @@ export function HomeScreen({ navigation }) {
     }
   }, [conversation, navigation]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshConversation();
+    }, [refreshConversation])
+  );
+
   function confirmLogout() {
     Alert.alert('Log out', 'You can log back in with the same user ID.', [
       { text: 'Cancel', style: 'cancel' },
@@ -40,19 +52,35 @@ export function HomeScreen({ navigation }) {
     ]);
   }
 
+  const title = partnerTitle(conversation?.partner);
   const preview = conversation?.lastMessage;
-  const previewText = preview
-    ? `${preview.senderId === user.id ? 'You: ' : ''}${previewLabel(preview)}`
-    : 'No messages yet';
+  const stats = conversation?.stats || { total: 0, sent: 0, received: 0, unread: 0 };
+  const draftLine = draft.text.trim().replace(/\s+/g, ' ');
+  const mine = preview?.senderId === user.id;
+  const status = conversation
+    ? presenceLabel({
+        online: conversation.partner.online,
+        activity: partnerActivity,
+        lastSeenAt: conversation.partner.lastSeenAt,
+      })
+    : '';
+  const live = Boolean(conversation?.partner.online || partnerActivity);
+  const lastText = !preview ? 'No messages yet' : preview.deleted ? 'This message was deleted' : previewLabel(preview);
+  const unreadText = conversation?.unreadMessage ? previewLabel(conversation.unreadMessage) : '';
 
   return (
     <View style={styles.screen}>
       <Header
         title="Chats"
         subtitle={connected ? undefined : 'Connecting…'}
+        leading={
+          <Pressable onPress={() => navigation.navigate('Profile')} hitSlop={6}>
+            <Avatar name={user.displayName || user.userId} photoUrl={user.photoUrl} size={36} />
+          </Pressable>
+        }
         right={
-          <Pressable onPress={confirmLogout} hitSlop={10} style={styles.logout}>
-            <Ionicons name="log-out-outline" size={24} color={colors.white} />
+          <Pressable onPress={() => setMenuOpen(true)} hitSlop={8} style={styles.menuButton}>
+            <Ionicons name="ellipsis-vertical" size={22} color={colors.onHeader} />
           </Pressable>
         }
       />
@@ -61,22 +89,62 @@ export function HomeScreen({ navigation }) {
           <ActivityIndicator color={colors.teal} />
         </View>
       ) : conversation ? (
-        <Pressable style={styles.row} onPress={() => navigation.navigate('Chat')}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial(conversation.partner.displayName)}</Text>
-          </View>
-          <View style={styles.rowBody}>
-            <View style={styles.rowTop}>
-              <Text style={styles.name} numberOfLines={1}>
-                {conversation.partner.displayName}
-              </Text>
-              <Text style={styles.time}>{listTime(preview?.createdAt)}</Text>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 28 }]}>
+          <View style={styles.card}>
+            <View style={styles.band} />
+            <Pressable style={styles.avatarWrap} onPress={() => navigation.navigate('Partner')}>
+              <Avatar name={title} photoUrl={conversation.partner.photoUrl} size={96} online={Boolean(conversation.partner.online)} />
+            </Pressable>
+            <Text style={styles.name}>{title}</Text>
+            <Text style={[styles.status, live && styles.statusLive]}>{status || 'Last seen unavailable'}</Text>
+
+            <View style={styles.stats}>
+              <Stat label="Total" value={stats.total} colors={colors} />
+              <Stat label="Sent" value={stats.sent} colors={colors} />
+              <Stat label="Received" value={stats.received} colors={colors} />
             </View>
-            <Text style={styles.preview} numberOfLines={1}>
-              {previewText}
-            </Text>
+
+            <View style={styles.block}>
+              <View style={styles.blockTop}>
+                <Text style={styles.blockLabel}>{preview ? (mine ? 'You sent' : `${title} sent`) : 'Last message'}</Text>
+                <Text style={styles.time}>{listTime(preview?.createdAt)}</Text>
+              </View>
+              <View style={styles.messageRow}>
+                {preview?.deleted && partnerActivity !== 'recording' && partnerActivity !== 'typing' ? (
+                  <Ionicons name="ban-outline" size={16} color={colors.muted} />
+                ) : null}
+                <Text style={[styles.message, preview?.deleted && styles.deletedMessage]} numberOfLines={3}>
+                  {partnerActivity === 'recording'
+                    ? 'recording audio…'
+                    : partnerActivity === 'typing'
+                      ? 'typing…'
+                      : lastText}
+                </Text>
+              </View>
+            </View>
+
+            {stats.unread > 0 ? (
+              <View style={styles.unread}>
+                <Text style={styles.unreadCount}>
+                  {stats.unread} unread
+                </Text>
+                <Text style={styles.unreadText} numberOfLines={2}>
+                  {unreadText}
+                </Text>
+              </View>
+            ) : null}
+
+            {draftLine ? (
+              <Text style={styles.draft} numberOfLines={2}>
+                Draft: {draftLine}
+              </Text>
+            ) : (
+              <View style={styles.buttonGap} />
+            )}
+
+            <PrimaryButton label="Open chat" onPress={() => navigation.navigate('Chat')} />
           </View>
-        </Pressable>
+        </ScrollView>
       ) : (
         <View style={styles.center}>
           <Ionicons name="chatbubbles-outline" size={64} color={colors.teal} />
@@ -86,13 +154,37 @@ export function HomeScreen({ navigation }) {
       )}
 
       {!conversation && conversationReady ? (
-        <Pressable
-          style={[styles.fab, { bottom: insets.bottom + 22 }]}
-          onPress={() => setPairOpen(true)}
-        >
-          <Ionicons name="add" size={34} color={colors.white} />
+        <Pressable style={[styles.fab, { bottom: insets.bottom + 22 }]} onPress={() => setPairOpen(true)}>
+          <Ionicons name="add" size={34} color={colors.onAccent} />
         </Pressable>
       ) : null}
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)}>
+          <Pressable style={[styles.menu, { top: insets.top + 56 }]} onPress={() => {}}>
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuOpen(false);
+                navigation.navigate('Starred');
+              }}
+            >
+              <Ionicons name="star-outline" size={20} color={colors.text} />
+              <Text style={styles.menuLabel}>Starred messages</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuOpen(false);
+                confirmLogout();
+              }}
+            >
+              <Ionicons name="log-out-outline" size={20} color={colors.danger} />
+              <Text style={[styles.menuLabel, styles.menuDanger]}>Log out</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <PairModal
         visible={pairOpen}
@@ -108,87 +200,189 @@ export function HomeScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.white,
-  },
-  logout: {
-    padding: 4,
-  },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: colors.background,
-  },
-  emptyTitle: {
-    marginTop: 16,
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  emptyBody: {
-    marginTop: 8,
-    textAlign: 'center',
-    color: colors.muted,
-    lineHeight: 20,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-    backgroundColor: colors.white,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.teal,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: colors.white,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  rowBody: {
-    flex: 1,
-  },
-  rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  name: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  time: {
-    color: colors.muted,
-    fontSize: 12,
-    marginLeft: 8,
-  },
-  preview: {
-    color: colors.muted,
-    marginTop: 3,
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.green,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-  },
-});
+function Stat({ label, value, colors }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', paddingVertical: 12 }}>
+      <Text style={{ color: colors.text, fontFamily: font.bold, fontSize: 22 }}>{value}</Text>
+      <Text style={{ color: colors.muted, fontFamily: font.semibold, fontSize: 12, marginTop: 2 }}>{label}</Text>
+    </View>
+  );
+}
+
+function makeHomeStyles(colors) {
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scroll: {
+      padding: 16,
+    },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 28,
+      paddingHorizontal: 18,
+      paddingBottom: 18,
+      overflow: 'hidden',
+    },
+    band: {
+      height: 92,
+      marginHorizontal: -18,
+      backgroundColor: colors.header,
+    },
+    avatarWrap: {
+      alignSelf: 'center',
+      marginTop: -48,
+    },
+    name: {
+      marginTop: 12,
+      textAlign: 'center',
+      color: colors.text,
+      fontFamily: font.bold,
+      fontSize: 26,
+    },
+    status: {
+      marginTop: 4,
+      textAlign: 'center',
+      color: colors.muted,
+      fontFamily: font.medium,
+      fontSize: 14,
+    },
+    statusLive: {
+      color: colors.green,
+    },
+    stats: {
+      flexDirection: 'row',
+      marginTop: 18,
+      backgroundColor: colors.background,
+      borderRadius: 18,
+    },
+    block: {
+      marginTop: 14,
+      padding: 14,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+    },
+    blockTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    blockLabel: {
+      flex: 1,
+      color: colors.teal,
+      fontFamily: font.bold,
+      fontSize: 13,
+    },
+    time: {
+      color: colors.muted,
+      fontFamily: font.medium,
+      fontSize: 12,
+    },
+    messageRow: {
+      marginTop: 6,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 6,
+    },
+    message: {
+      flex: 1,
+      color: colors.text,
+      fontFamily: font.medium,
+      fontSize: 16,
+      lineHeight: 22,
+    },
+    deletedMessage: {
+      color: colors.muted,
+      fontStyle: 'italic',
+    },
+    unread: {
+      marginTop: 12,
+      padding: 14,
+      borderRadius: 18,
+      backgroundColor: colors.quote,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.green,
+    },
+    unreadCount: {
+      color: colors.green,
+      fontFamily: font.bold,
+      fontSize: 13,
+    },
+    unreadText: {
+      marginTop: 4,
+      color: colors.text,
+      fontFamily: font.medium,
+      fontSize: 15,
+    },
+    buttonGap: {
+      height: 16,
+    },
+    draft: {
+      marginTop: 12,
+      marginBottom: 12,
+      color: colors.green,
+      fontFamily: font.semibold,
+      fontSize: 14,
+    },
+    menuButton: {
+      padding: 4,
+    },
+    backdrop: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+    },
+    menu: {
+      position: 'absolute',
+      right: 14,
+      minWidth: 220,
+      backgroundColor: colors.surface,
+      borderRadius: 18,
+      paddingVertical: 6,
+    },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    menuLabel: {
+      color: colors.text,
+      fontFamily: font.semibold,
+      fontSize: 16,
+    },
+    menuDanger: {
+      color: colors.danger,
+    },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      backgroundColor: colors.background,
+    },
+    emptyTitle: {
+      marginTop: 16,
+      fontSize: 22,
+      fontFamily: font.bold,
+      color: colors.text,
+    },
+    emptyBody: {
+      marginTop: 8,
+      textAlign: 'center',
+      color: colors.muted,
+      lineHeight: 20,
+    },
+    fab: {
+      position: 'absolute',
+      right: 20,
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: colors.green,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 4,
+    },
+  });
+}

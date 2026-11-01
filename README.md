@@ -34,7 +34,7 @@ The API listens on port `4000`.
 
 ## Run the app
 
-Expo SDK 58 asks for **Node.js 22.13 or newer**. `npx expo start` may still run on Node 20 and print a warning. Install Node 22 if Expo refuses to start. Then:
+The phone app uses **Expo SDK 54**, so open it with Expo Go for SDK 54. Node.js 20 is enough. Then:
 
 ```bash
 cd app

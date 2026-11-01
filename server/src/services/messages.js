@@ -22,7 +22,7 @@ export function assertMediaUrl(url) {
   return url;
 }
 
-export async function createChatMessage(user, payload) {
+export async function createChatMessage(user, payload, { status = 'sent' } = {}) {
   const conversationId = payload?.conversationId;
   if (!conversationId || !mongoose.isValidObjectId(conversationId)) {
     throw new HttpError(404, 'Chat not found.');
@@ -37,6 +37,7 @@ export async function createChatMessage(user, payload) {
   let text = '';
   let mediaUrl = '';
   let durationMs = 0;
+  let waveform = [];
 
   if (type === 'text') {
     if (typeof payload.text !== 'string' || !payload.text.trim()) {
@@ -56,9 +57,34 @@ export async function createChatMessage(user, payload) {
       if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > MAX_VOICE_MS) {
         throw new HttpError(400, 'Voice message must be under 5 minutes.');
       }
+      if (Array.isArray(payload.waveform)) {
+        waveform = payload.waveform.slice(0, 48).map((value) => {
+          const level = Number(value);
+          if (!Number.isFinite(level)) return 0;
+          return Math.max(0, Math.min(100, Math.round(level)));
+        });
+      }
     }
   } else {
     throw new HttpError(400, 'Unsupported message.');
+  }
+
+  let replyTo;
+  if (payload.replyTo) {
+    if (!mongoose.isValidObjectId(payload.replyTo)) {
+      throw new HttpError(400, 'That reply is not in this chat.');
+    }
+    const original = await Message.findById(payload.replyTo);
+    if (!original || !original.conversationId.equals(conversation._id)) {
+      throw new HttpError(400, 'That reply is not in this chat.');
+    }
+    replyTo = {
+      messageId: original._id.toString(),
+      senderId: original.senderId.toString(),
+      type: original.type,
+      text: original.type === 'text' ? original.text : original.type === 'image' ? 'Photo' : 'Voice message',
+      mediaUrl: original.type === 'image' ? original.mediaUrl : '',
+    };
   }
 
   const message = await Message.create({
@@ -68,6 +94,9 @@ export async function createChatMessage(user, payload) {
     text,
     mediaUrl,
     durationMs,
+    waveform,
+    status,
+    ...(replyTo ? { replyTo } : {}),
   });
 
   conversation.lastMessage = {

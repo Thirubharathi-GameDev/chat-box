@@ -1,0 +1,12 @@
+{
+  "name": "voice-route",
+  "version": "1.0.0",
+  "description": "Plays a voice note through the loudspeaker or the earpiece.",
+  "main": "index.js",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

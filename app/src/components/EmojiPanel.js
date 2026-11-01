@@ -1,8 +1,11 @@
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import { EMOJIS } from '../emojis';
-import { colors } from '../theme';
+import { useColors } from '../theme';
 
 export function EmojiPanel({ onPick }) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <ScrollView style={styles.panel} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {EMOJIS.map((emoji) => (
@@ -14,10 +17,11 @@ export function EmojiPanel({ onPick }) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors) {
+  return StyleSheet.create({
   panel: {
     maxHeight: 220,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
@@ -34,4 +38,5 @@ const styles = StyleSheet.create({
   emoji: {
     fontSize: 26,
   },
-});
+  });
+}

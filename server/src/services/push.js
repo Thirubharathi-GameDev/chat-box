@@ -1,6 +1,10 @@
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+
+const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 let firebaseReady = false;
 
@@ -8,9 +12,11 @@ function readCredentials() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   }
-  const path = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-  if (path && fs.existsSync(path)) {
-    return JSON.parse(fs.readFileSync(path, 'utf8'));
+  const configured = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (!configured) return null;
+  const filePath = path.isAbsolute(configured) ? configured : path.resolve(serverRoot, configured);
+  if (fs.existsSync(filePath)) {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   }
   return null;
 }
@@ -33,7 +39,7 @@ export function initFirebase() {
   }
 }
 
-async function sendExpoPush(token, { title, body, data }) {
+async function sendExpoPush(token, { title, body, data, badge }) {
   const response = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: {
@@ -45,6 +51,7 @@ async function sendExpoPush(token, { title, body, data }) {
       title,
       body,
       sound: 'default',
+      badge,
       data,
     }),
   });
@@ -53,10 +60,11 @@ async function sendExpoPush(token, { title, body, data }) {
   }
 }
 
-export async function sendPush(token, { title, body, data }) {
+export async function sendPush(token, { title, body, data, badge = 0 }) {
   if (!token) return;
+  const count = Math.max(0, Number(badge) || 0);
   if (token.startsWith('ExponentPushToken')) {
-    await sendExpoPush(token, { title, body, data });
+    await sendExpoPush(token, { title, body, data, badge: count });
     return;
   }
   if (!firebaseReady) return;
@@ -70,7 +78,10 @@ export async function sendPush(token, { title, body, data }) {
     token,
     notification: { title, body },
     data: stringData,
-    android: { priority: 'high', notification: { channelId: 'messages', sound: 'default' } },
-    apns: { payload: { aps: { sound: 'default' } } },
+    android: {
+      priority: 'high',
+      notification: { channelId: 'messages', sound: 'default', notificationCount: count },
+    },
+    apns: { payload: { aps: { sound: 'default', badge: count } } },
   });
 }

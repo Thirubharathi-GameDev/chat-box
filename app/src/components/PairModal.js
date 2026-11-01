@@ -1,11 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -13,7 +11,8 @@ import {
   View,
 } from 'react-native';
 import { api } from '../api';
-import { colors } from '../theme';
+import { font, useColors } from '../theme';
+import { KeyboardScreen } from '../useKeyboardInset';
 
 export function PairModal({ visible, token, onClose, onConnected }) {
   const [loading, setLoading] = useState(false);
@@ -23,6 +22,8 @@ export function PairModal({ visible, token, onClose, onConnected }) {
   const [entry, setEntry] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const colors = useColors();
+  const styles = useMemo(() => makePairStyles(colors), [colors]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -93,10 +94,7 @@ export function PairModal({ visible, token, onClose, onConnected }) {
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.backdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardScreen style={styles.backdrop}>
         <Pressable style={styles.dismiss} onPress={onClose} />
         <View style={styles.card}>
           <View style={styles.titleRow}>
@@ -141,15 +139,16 @@ export function PairModal({ visible, token, onClose, onConnected }) {
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable style={[styles.button, busy && styles.buttonDisabled]} onPress={redeem} disabled={busy}>
-            {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Connect</Text>}
+            {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.buttonText}>Connect</Text>}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardScreen>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
+function makePairStyles(colors) {
+  return StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: colors.overlay,
@@ -160,7 +159,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: 18,
     padding: 20,
   },
@@ -193,7 +192,7 @@ const styles = StyleSheet.create({
     borderColor: colors.teal,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3FAF8',
+    backgroundColor: colors.shell,
   },
   code: {
     fontSize: 32,
@@ -246,8 +245,9 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   buttonText: {
-    color: colors.white,
-    fontWeight: '800',
+    color: colors.onAccent,
+    fontFamily: font.bold,
     fontSize: 16,
   },
-});
+  });
+}

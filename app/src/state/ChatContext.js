@@ -1,10 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { io } from 'socket.io-client';
 import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { getApiUrl } from '../config';
 import { previewLabel } from '../format';
-import { registerForPush } from '../notifications';
+import { loadPushEnabled, setAppBadge, syncAccountPush } from '../notifications';
+import { loadConversation, loadDraft, saveConversation, saveDraft } from '../cache';
+import { loadSpeakerPreference } from '../speaker';
 
 const ChatContext = createContext(null);
 
@@ -23,8 +26,13 @@ export function ChatProvider({ children }) {
   const [connected, setConnected] = useState(false);
   const [conversation, setConversation] = useState(null);
   const [conversationReady, setConversationReady] = useState(false);
+  const [partnerActivity, setPartnerActivity] = useState('');
+  const [draft, setDraftState] = useState({ text: '', reply: null });
+  const draftLoaded = useRef(false);
 
   const signedIn = Boolean(token && user?.displayName);
+  const conversationRef = useRef(null);
+  conversationRef.current = conversation;
 
   useEffect(() => {
     if (!signedIn) {
@@ -35,12 +43,23 @@ export function ChatProvider({ children }) {
 
     let cancel = false;
     setConversationReady(false);
+    loadConversation(user.id).then((cached) => {
+      if (!cancel && cached) {
+        setConversation(cached);
+        setConversationReady(true);
+      }
+    });
     api('/api/conversation', { token })
       .then((data) => {
-        if (!cancel) setConversation(data.conversation);
+        if (cancel) return;
+        setConversation(data.conversation);
+        if (data.conversation) saveConversation(user.id, data.conversation);
       })
       .catch(() => {
-        if (!cancel) setConversation(null);
+        if (cancel) return;
+        loadConversation(user.id).then((cached) => {
+          if (!cancel && !cached) setConversation(null);
+        });
       })
       .finally(() => {
         if (!cancel) setConversationReady(true);
@@ -61,47 +80,188 @@ export function ChatProvider({ children }) {
     const next = io(getApiUrl(), { auth: { token } });
     setSocket(next);
 
-    const onConnect = () => setConnected(true);
+    const onConnect = () => {
+      setConnected(true);
+      next.emit('app:foreground', { active: AppState.currentState === 'active' });
+    };
+    const onAppState = (state) => {
+      if (next.connected) next.emit('app:foreground', { active: state === 'active' });
+    };
+    const appState = AppState.addEventListener('change', onAppState);
     const onDisconnect = () => setConnected(false);
     const onPair = ({ conversation: nextConversation }) => {
       setConversation(nextConversation);
+      if (user?.id && nextConversation) saveConversation(user.id, nextConversation);
+    };
+    const refreshConversation = () => {
+      api('/api/conversation', { token })
+        .then((data) => {
+          setConversation((current) => {
+            if (!data.conversation) return null;
+            const next = data.conversation;
+            if (!current) return next;
+            return {
+              ...next,
+              partner: {
+                ...next.partner,
+                online: current.partner?.online ?? next.partner.online,
+                lastSeenAt: current.partner?.lastSeenAt || next.partner.lastSeenAt,
+              },
+            };
+          });
+          if (user?.id && data.conversation) saveConversation(user.id, data.conversation);
+        })
+        .catch(() => {});
     };
     const onMessage = ({ message }) => {
       setConversation((current) => {
         if (!current || current.id !== message.conversationId) return current;
         return { ...current, lastMessage: lastMessageFrom(message) };
       });
+      refreshConversation();
+    };
+    const onPresence = (payload) => {
+      setConversation((current) => {
+        if (!current || current.partner?.id !== payload.userId) return current;
+        return {
+          ...current,
+          partner: {
+            ...current.partner,
+            online: Boolean(payload.online),
+            lastSeenAt: payload.lastSeenAt || null,
+          },
+        };
+      });
+    };
+    const onProfile = (payload) => {
+      setConversation((current) => {
+        if (!current || current.partner?.id !== payload.userId) return current;
+        return {
+          ...current,
+          partner: {
+            ...current.partner,
+            displayName: payload.displayName || current.partner.displayName,
+            photoUrl: payload.photoUrl || '',
+          },
+        };
+      });
+    };
+    let typingTimer;
+    const onTyping = (payload) => {
+      if (conversationRef.current?.id !== payload.conversationId) return;
+      const nextActivity = payload.active ? (payload.kind === 'recording' ? 'recording' : 'typing') : '';
+      setPartnerActivity(nextActivity);
+      clearTimeout(typingTimer);
+      if (nextActivity) typingTimer = setTimeout(() => setPartnerActivity(''), 4000);
     };
 
     next.on('connect', onConnect);
     next.on('disconnect', onDisconnect);
     next.on('pair:joined', onPair);
+    const onDeleted = () => refreshConversation();
+    const onEdited = () => refreshConversation();
     next.on('message:new', onMessage);
+    next.on('message:deleted', onDeleted);
+    next.on('message:edited', onEdited);
+    next.on('presence', onPresence);
+    next.on('profile:updated', onProfile);
+    next.on('typing', onTyping);
 
     return () => {
+      clearTimeout(typingTimer);
+      appState.remove();
       next.off('connect', onConnect);
       next.off('disconnect', onDisconnect);
       next.off('pair:joined', onPair);
       next.off('message:new', onMessage);
+      next.off('message:deleted', onDeleted);
+      next.off('message:edited', onEdited);
+      next.off('presence', onPresence);
+      next.off('profile:updated', onProfile);
+      next.off('typing', onTyping);
       next.disconnect();
       setSocket(null);
       setConnected(false);
+      setPartnerActivity('');
     };
   }, [signedIn, token]);
 
   useEffect(() => {
-    if (!signedIn) return undefined;
+    if (!user?.id || !conversation?.id) {
+      draftLoaded.current = false;
+      setDraftState({ text: '', reply: null });
+      return undefined;
+    }
     let cancel = false;
-    registerForPush()
-      .then((pushToken) => {
-        if (!pushToken || cancel) return null;
-        return api('/api/me/push-token', { token, method: 'POST', body: { token: pushToken } });
+    draftLoaded.current = false;
+    loadDraft(user.id, conversation.id).then((saved) => {
+      if (cancel || draftLoaded.current) return;
+      draftLoaded.current = true;
+      setDraftState(saved);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [user?.id, conversation?.id]);
+
+  const setDraft = useCallback((next) => {
+    const text = typeof next?.text === 'string' ? next.text : '';
+    const value = { text, reply: text.trim() ? next.reply || null : null };
+    draftLoaded.current = true;
+    setDraftState(value);
+    const id = conversationRef.current?.id;
+    if (user?.id && id) saveDraft(user.id, id, value);
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadSpeakerPreference();
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setAppBadge(0);
+      return;
+    }
+    setAppBadge(conversation?.stats?.unread || 0);
+  }, [signedIn, conversation?.stats?.unread]);
+
+  useEffect(() => {
+    if (!signedIn || !user?.id) return undefined;
+    let cancel = false;
+    loadPushEnabled(user.id)
+      .then((enabled) => {
+        if (cancel) return null;
+        return syncAccountPush({ authToken: token, enabled });
       })
       .catch(() => {});
     return () => {
       cancel = true;
     };
-  }, [signedIn, token]);
+  }, [signedIn, token, user?.id]);
+
+  const refreshConversation = useCallback(() => {
+    if (!token) return;
+    api('/api/conversation', { token })
+      .then((data) => {
+        if (!data.conversation) {
+          setConversation(null);
+          return;
+        }
+        setConversation((current) => {
+          const next = {
+            ...data.conversation,
+            partner: {
+              ...data.conversation.partner,
+              online: current?.partner?.online ?? data.conversation.partner.online,
+              lastSeenAt: current?.partner?.lastSeenAt || data.conversation.partner.lastSeenAt,
+            },
+          };
+          if (user?.id) saveConversation(user.id, next);
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, [token, user?.id]);
 
   const value = useMemo(
     () => ({
@@ -110,8 +270,12 @@ export function ChatProvider({ children }) {
       conversation,
       setConversation,
       conversationReady,
+      partnerActivity,
+      draft,
+      setDraft,
+      refreshConversation,
     }),
-    [socket, connected, conversation, conversationReady]
+    [socket, connected, conversation, conversationReady, partnerActivity, draft, setDraft, refreshConversation]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

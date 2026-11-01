@@ -1,7 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { api } from './api';
 
 try {
   Notifications.setNotificationHandler({
@@ -9,11 +11,51 @@ try {
       shouldShowBanner: true,
       shouldShowList: true,
       shouldPlaySound: true,
-      shouldSetBadge: false,
+      shouldSetBadge: true,
     }),
   });
 } catch {
   // Remote notifications are not available inside Expo Go.
+}
+
+export async function setAppBadge(count) {
+  try {
+    await Notifications.setBadgeCountAsync(Math.max(0, Number(count) || 0));
+  } catch {
+    // Some launchers and Expo Go cannot draw a count on the icon.
+  }
+}
+
+function pushKey(userId) {
+  return `chatbox.push.${userId}`;
+}
+
+export async function loadPushEnabled(userId) {
+  if (!userId) return false;
+  try {
+    const value = await AsyncStorage.getItem(pushKey(userId));
+    if (value == null) return true;
+    return value === 'on';
+  } catch {
+    return true;
+  }
+}
+
+export async function savePushEnabled(userId, enabled) {
+  if (!userId) return;
+  await AsyncStorage.setItem(pushKey(userId), enabled ? 'on' : 'off');
+}
+
+export async function syncAccountPush({ authToken, enabled }) {
+  if (!authToken) return { registered: false };
+  if (!enabled) {
+    await api('/api/me/push-token', { token: authToken, method: 'POST', body: { token: '' } });
+    return { registered: false };
+  }
+  const pushToken = await registerForPush();
+  if (!pushToken) return { registered: false };
+  await api('/api/me/push-token', { token: authToken, method: 'POST', body: { token: pushToken } });
+  return { registered: true };
 }
 
 export async function registerForPush() {
@@ -24,6 +66,8 @@ export async function registerForPush() {
       await Notifications.setNotificationChannelAsync('messages', {
         name: 'Messages',
         importance: Notifications.AndroidImportance.HIGH,
+        showBadge: true,
+        sound: 'default',
       });
     }
 

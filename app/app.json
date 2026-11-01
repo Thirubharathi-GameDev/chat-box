@@ -1,24 +1,35 @@
 {
   "expo": {
-    "name": "Chatbox",
-    "slug": "chatbox",
-    "scheme": "chatbox",
+    "name": "Kin",
+    "slug": "chat-box",
+    "scheme": "kin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#12362F"
+    },
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "com.chatbox.app",
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Chatbox uses the microphone so you can send voice messages.",
-        "NSPhotoLibraryUsageDescription": "Chatbox uses your photos so you can send pictures."
+        "NSMicrophoneUsageDescription": "Kin uses the microphone so you can send voice messages.",
+        "NSPhotoLibraryUsageDescription": "Kin uses your photos so you can send pictures."
       }
     },
     "android": {
+      "package": "com.chatbox.app",
       "softwareKeyboardLayoutMode": "resize",
-      "permissions": ["RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
       "adaptiveIcon": {
-        "backgroundColor": "#075E54",
+        "backgroundColor": "#12362F",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -27,21 +38,39 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/replace-after-eas-init"
+    },
+    "owner": "thirubharathi",
     "plugins": [
       "expo-secure-store",
       "expo-audio",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Chatbox uses your photos so you can send pictures."
+          "photosPermission": "Kin uses your photos so you can send pictures."
         }
       ],
       [
         "expo-notifications",
         {
-          "color": "#075E54"
+          "color": "#12362F",
+          "defaultChannel": "messages"
         }
-      ]
-    ]
+      ],
+      "expo-font",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6f2c239e-a0b4-45fa-8467-34fec38be28a"
+      }
+    }
   }
 }
