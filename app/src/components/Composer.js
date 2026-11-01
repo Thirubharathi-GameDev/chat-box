@@ -9,7 +9,7 @@ import {
 } from 'expo-audio';
 import { useEffect, useRef, useState } from 'react';
 import { useMemo } from 'react';
-import { Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, AppState, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { durationLabel } from '../format';
 import { font, useColors } from '../theme';
 import { EmojiPanel } from './EmojiPanel';
@@ -47,9 +47,10 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const activeRef = useRef(false);
+  const preparingRef = useRef(false);
+  const gestureRef = useRef(0);
   const cancelRef = useRef(false);
   const startedAt = useRef(0);
-  const sessionRef = useRef(0);
   const samplesRef = useRef([]);
   const [elapsed, setElapsed] = useState(0);
   const [levels, setLevels] = useState([]);
@@ -79,6 +80,20 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   const recordingNotify = useRef(onRecording);
   recordingNotify.current = onRecording;
   useEffect(() => () => recordingNotify.current?.(false), []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        if (!activeRef.current && !preparingRef.current) actions.current.silence?.();
+        return;
+      }
+      if (!activeRef.current) return;
+      cancelRef.current = true;
+      gestureRef.current += 1;
+      actions.current.finish?.();
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (!recording) return undefined;
@@ -111,72 +126,130 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     await onSendText(value);
   }
 
-  async function beginRecording() {
-    if (disabled || activeRef.current) return;
-    const current = await getRecordingPermissionsAsync();
-    if (!current.granted) {
-      keepFocus.current = false;
-      const asked = await requestRecordingPermissionsAsync();
-      if (!asked.granted) {
-        Alert.alert('Microphone', 'Allow microphone access to send voice messages.');
-      }
-      return;
-    }
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), ms);
+      Promise.resolve(promise).then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }
 
-    cancelRef.current = false;
-    activeRef.current = true;
-    const session = sessionRef.current + 1;
-    sessionRef.current = session;
+  async function silenceRecorder() {
+    preparingRef.current = false;
     try {
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-        interruptionMode: 'doNotMix',
-        shouldPlayInBackground: false,
-        shouldRouteThroughEarpiece: false,
-      });
-      await recorder.prepareToRecordAsync();
-      if (sessionRef.current !== session || cancelRef.current) {
-        activeRef.current = false;
+      const status = recorder.getStatus();
+      if (!recorder.isRecording && !status?.isRecording && !status?.canRecord) return;
+      await withTimeout(recorder.stop(), 4000);
+    } catch {
+      // The recorder was already idle, or this reset could not finish.
+    }
+  }
+
+  async function beginRecording(gesture) {
+    if (disabled) return;
+    const alive = () => gestureRef.current === gesture;
+    if (activeRef.current) {
+      await finishRecording();
+      if (!alive()) return;
+    }
+    try {
+      const current = await getRecordingPermissionsAsync();
+      if (!alive()) return;
+      if (!current.granted) {
+        keepFocus.current = false;
+        const asked = await requestRecordingPermissionsAsync();
+        if (!alive()) return;
+        if (!asked.granted) {
+          Alert.alert('Microphone', 'Allow microphone access to send voice messages.');
+        }
+        return;
+      }
+
+      preparingRef.current = true;
+      onRecording?.(true);
+      await silenceRecorder();
+      if (!alive()) return;
+      preparingRef.current = true;
+      await withTimeout(
+        setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+          interruptionMode: 'doNotMix',
+          shouldPlayInBackground: false,
+          shouldRouteThroughEarpiece: false,
+        }),
+        8000
+      );
+      if (!alive()) {
+        await silenceRecorder();
+        onRecording?.(false);
+        return;
+      }
+      try {
+        await withTimeout(recorder.prepareToRecordAsync(), 8000);
+      } catch {
+        await silenceRecorder();
+        if (!alive()) {
+          onRecording?.(false);
+          return;
+        }
+        preparingRef.current = true;
+        await withTimeout(recorder.prepareToRecordAsync(), 8000);
+      }
+      if (!alive() || cancelRef.current) {
+        await silenceRecorder();
+        onRecording?.(false);
         return;
       }
       samplesRef.current = [];
       setLevels([]);
       recorder.record();
+      preparingRef.current = false;
+      activeRef.current = true;
       startedAt.current = Date.now();
       setRecording(true);
       onTyping?.(false);
-      onRecording?.(true);
     } catch {
       activeRef.current = false;
+      preparingRef.current = false;
       setRecording(false);
       onRecording?.(false);
-      Alert.alert('Voice message', 'Could not start recording.');
+      await silenceRecorder();
+      if (alive()) Alert.alert('Voice message', 'Could not start recording.');
     }
   }
 
   async function finishRecording() {
-    if (!activeRef.current) {
-      cancelRef.current = true;
-      releaseKeyboard();
-      return;
-    }
+    const wasActive = activeRef.current;
     const cancelled = cancelRef.current;
     cancelRef.current = false;
     activeRef.current = false;
-    sessionRef.current += 1;
+    preparingRef.current = false;
+    if (!wasActive) {
+      releaseKeyboard();
+      return;
+    }
     setRecording(false);
     onRecording?.(false);
     let uri = '';
     let durationMs = 0;
     let waveform = [];
     try {
-      if (recorder.isRecording) await recorder.stop();
       durationMs = Date.now() - startedAt.current;
       waveform = downsampleLevels(samplesRef.current, 36).map((level) => Math.round(level * 100));
+      await withTimeout(recorder.stop(), 8000);
       uri = recorder.uri || '';
     } catch {
       uri = '';
+      await silenceRecorder();
     } finally {
       samplesRef.current = [];
       setLevels([]);
@@ -199,7 +272,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   }
 
   const actions = useRef({});
-  actions.current = { begin: beginRecording, finish: finishRecording, holdKeyboard, disabled };
+  actions.current = { begin: beginRecording, finish: finishRecording, silence: silenceRecorder, holdKeyboard, disabled };
   const micPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => {
@@ -212,7 +285,8 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
         slide.setValue(0);
         armedRef.current = false;
         setArmed(false);
-        actions.current.begin();
+        gestureRef.current += 1;
+        actions.current.begin(gestureRef.current);
       },
       onPanResponderMove: (_, gesture) => {
         const x = Math.max(-140, Math.min(0, gesture.dx));
@@ -224,12 +298,14 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
         setArmed(next);
       },
       onPanResponderRelease: () => {
+        gestureRef.current += 1;
         actions.current.finish();
         slide.setValue(0);
         armedRef.current = false;
         setArmed(false);
       },
       onPanResponderTerminate: () => {
+        gestureRef.current += 1;
         if (!armedRef.current) cancelRef.current = false;
         actions.current.finish();
         slide.setValue(0);

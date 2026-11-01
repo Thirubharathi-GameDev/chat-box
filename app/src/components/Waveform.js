@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { useRef } from 'react';
+import { PanResponder, StyleSheet, View } from 'react-native';
 
 export function normalizeMeter(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 0.08;
@@ -25,10 +26,34 @@ export function downsampleLevels(samples, count = 36) {
   return bars;
 }
 
-export function Waveform({ levels, progress = 0, color = '#1F6F62', dim = '#D5D0C8' }) {
+export function Waveform({ levels, progress = 0, color = '#1F6F62', dim = '#D5D0C8', onSeek }) {
   const bars = levels?.length ? levels : [0.18, 0.28, 0.16, 0.34, 0.2, 0.3, 0.14, 0.26];
+  const seekRef = useRef(onSeek);
+  const widthRef = useRef(1);
+  seekRef.current = onSeek;
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => Boolean(seekRef.current),
+      onMoveShouldSetPanResponder: () => Boolean(seekRef.current),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (event) => {
+        const ratio = event.nativeEvent.locationX / widthRef.current;
+        seekRef.current?.(Math.max(0, Math.min(1, ratio)));
+      },
+      onPanResponderMove: (event) => {
+        const ratio = event.nativeEvent.locationX / widthRef.current;
+        seekRef.current?.(Math.max(0, Math.min(1, ratio)));
+      },
+    })
+  ).current;
   return (
-    <View style={styles.row}>
+    <View
+      style={styles.row}
+      onLayout={(event) => {
+        widthRef.current = event.nativeEvent.layout.width || 1;
+      }}
+      {...pan.panHandlers}
+    >
       {bars.map((level, index) => {
         const amount = typeof level === 'number' && level > 1 ? level / 100 : level;
         const played = progress > 0 && (index + 0.5) / bars.length <= progress;

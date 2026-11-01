@@ -78,6 +78,23 @@ class VoiceRouteModule : Module() {
       }
     }
 
+    Function("resume") {
+      handler.post {
+        val active = player ?: return@post
+        active.start()
+        ticking = true
+        handler.removeCallbacks(tick)
+        handler.post(tick)
+      }
+    }
+
+    Function("seek") { positionSeconds: Double ->
+      handler.post {
+        val active = player ?: return@post
+        active.seekTo((positionSeconds * 1000).toInt().coerceAtLeast(0))
+      }
+    }
+
     Function("stop") {
       handler.post { shutdown() }
     }

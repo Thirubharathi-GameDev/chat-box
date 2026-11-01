@@ -64,6 +64,7 @@ export function MessageBubble({
   playing,
   progress,
   onToggleVoice,
+  onSeekVoice,
   onDownloadVoice,
   voiceReady,
   voiceDownloading,
@@ -166,9 +167,10 @@ export function MessageBubble({
               )}
               <Waveform
                 levels={message.waveform}
-                progress={voiceReady && playing ? progress : 0}
+                progress={voiceReady ? progress : 0}
                 color={colors.teal}
                 dim={colors.shell}
+                onSeek={voiceReady ? (ratio) => onSeekVoice?.(message, ratio) : undefined}
               />
               <Text style={styles.duration}>{durationLabel(message.durationMs)}</Text>
               {voiceReady ? (

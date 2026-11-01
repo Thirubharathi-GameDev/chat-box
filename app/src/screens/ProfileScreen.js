@@ -256,7 +256,7 @@ export function ProfileScreen({ navigation }) {
         </Text>
         <PrimaryButton label="Save name" onPress={saveName} busy={saving} icon="check" />
         <Text style={{ color: colors.muted, fontFamily: font.medium, textAlign: 'center', marginTop: 16 }}>
-          Version {Constants.expoConfig?.version || '1.0.0'}
+          Version {'1.0.1'}
         </Text>
       </ScrollView>
     </KeyboardScreen>

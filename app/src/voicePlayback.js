@@ -23,8 +23,14 @@ function createNativeController({ uri, onUpdate }) {
     });
   });
   return {
-    play(earpiece) {
-      return native.play(uri, Boolean(earpiece), 0);
+    play(earpiece, position = 0) {
+      return native.play(uri, Boolean(earpiece), Number(position) || 0);
+    },
+    seek(position) {
+      native.seek(Number(position) || 0);
+    },
+    resume() {
+      native.resume();
     },
     setEarpiece(earpiece) {
       return native.setEarpiece(Boolean(earpiece));
@@ -42,6 +48,8 @@ function createNativeController({ uri, onUpdate }) {
 function createExpoController({ uri, onUpdate }) {
   let player = null;
   let ticket = 0;
+  let earpieceOn = false;
+  let pausedAt = 0;
 
   function attach(next, id) {
     next.addListener('playbackStatusUpdate', (status) => {
@@ -66,18 +74,33 @@ function createExpoController({ uri, onUpdate }) {
   }
 
   return {
-    play(earpiece) {
-      return start(earpiece, 0);
+    play(earpiece, position = 0) {
+      earpieceOn = Boolean(earpiece);
+      pausedAt = Number(position) || 0;
+      return start(earpieceOn, pausedAt);
+    },
+    async seek(position) {
+      pausedAt = Number(position) || 0;
+      if (player) await player.seekTo(pausedAt);
+    },
+    resume() {
+      if (player && !player.playing) {
+        player.play();
+        return undefined;
+      }
+      return start(earpieceOn, pausedAt);
     },
     async setEarpiece(earpiece) {
-      const position = player?.currentTime || 0;
+      earpieceOn = Boolean(earpiece);
+      const position = player?.currentTime || pausedAt;
       if (!player?.playing) {
-        await applyExpoMode(earpiece);
+        await applyExpoMode(earpieceOn);
         return;
       }
-      await start(earpiece, position);
+      await start(earpieceOn, position);
     },
     pause() {
+      pausedAt = player?.currentTime || pausedAt;
       player?.pause();
     },
     stop() {

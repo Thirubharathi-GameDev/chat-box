@@ -55,6 +55,7 @@ export function ChatScreen({ navigation, route }) {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState(null);
+  const [pausedId, setPausedId] = useState(null);
   const [voiceBusy, setVoiceBusy] = useState({});
   const [playProgress, setPlayProgress] = useState(0);
   const [viewer, setViewer] = useState(null);
@@ -264,6 +265,13 @@ export function ChatScreen({ navigation, route }) {
   }
 
   function setRecording(active) {
+    if (active) {
+      stopPlayback();
+      setPlayingId(null);
+      setPausedId(null);
+      setPlayProgress(0);
+      playPosition.current = 0;
+    }
     if (!socket || !conversationId) return;
     clearTimeout(typingTimer.current);
     clearInterval(recordingPulse.current);
@@ -638,41 +646,116 @@ export function ChatScreen({ navigation, route }) {
     }
   }
 
+  const playPosition = useRef(0);
+  const playDuration = useRef(0);
+
   function stopPlayback() {
     playbackRef.current?.stop();
     playbackRef.current = null;
+  }
+
+  function clearVoicePlace() {
+    playPosition.current = 0;
+    playDuration.current = 0;
+    setPausedId(null);
+    setPlayProgress(0);
+  }
+
+  async function startVoice(message, position) {
+    const id = message.id || message.clientId;
+    const uri = localVoiceUri(message);
+    if (!uri) return;
+    stopPlayback();
+    const controller = createVoiceController({
+      uri,
+      onUpdate: (status) => {
+        if (playbackRef.current !== controller) return;
+        if (status.didFinish) {
+          playPosition.current = 0;
+          playDuration.current = 0;
+          setPausedId(null);
+          setPlayingId(null);
+          setPlayProgress(0);
+          controller.stop();
+          if (playbackRef.current === controller) playbackRef.current = null;
+          return;
+        }
+        playPosition.current = status.position || 0;
+        const duration = status.duration || (message.durationMs || 0) / 1000;
+        if (duration > 0) {
+          playDuration.current = duration;
+          setPlayProgress(Math.max(0, Math.min(1, status.position / duration)));
+        }
+      },
+    });
+    playbackRef.current = controller;
+    const duration = (message.durationMs || 0) / 1000;
+    playPosition.current = position;
+    if (duration > 0) {
+      playDuration.current = duration;
+      setPlayProgress(Math.max(0, Math.min(1, position / duration)));
+    }
+    await controller.play(!speakerOn(), position);
+    setPausedId(null);
+    setPlayingId(id);
   }
 
   async function toggleVoice(message) {
     const id = message.id || message.clientId;
     if (playingId === id) {
       playbackRef.current?.pause();
+      setPausedId(id);
       setPlayingId(null);
-      setPlayProgress(0);
       return;
     }
-    const uri = localVoiceUri(message);
-    if (!uri) return;
+    const resumeAt = pausedId === id ? playPosition.current : 0;
+    if (pausedId === id && playbackRef.current?.resume) {
+      try {
+        await playbackRef.current.resume();
+        setPausedId(null);
+        setPlayingId(id);
+        return;
+      } catch {
+        // The player was released, so start again from the saved spot.
+      }
+    }
     try {
-      stopPlayback();
-      const controller = createVoiceController({
-        uri,
-        onUpdate: (status) => {
-          if (status.didFinish) {
-            setPlayingId(null);
-            setPlayProgress(0);
-            return;
-          }
-          const duration = status.duration || (message.durationMs || 0) / 1000;
-          if (duration > 0) setPlayProgress(Math.max(0, Math.min(1, status.position / duration)));
-        },
-      });
-      playbackRef.current = controller;
-      await controller.play(!speakerOn());
-      setPlayingId(id);
-      setPlayProgress(0);
+      await startVoice(message, resumeAt);
     } catch {
       stopPlayback();
+      clearVoicePlace();
+      setPlayingId(null);
+      Alert.alert('Voice message', 'Could not play that recording.');
+    }
+  }
+
+  async function seekVoice(message, ratio) {
+    const id = message.id || message.clientId;
+    const known = (playingId === id || pausedId === id) && playDuration.current ? playDuration.current : 0;
+    const duration = known || (message.durationMs || 0) / 1000;
+    if (duration <= 0) return;
+    const position = Math.min(Math.max(0, ratio * duration), Math.max(0, duration - 0.05));
+    playPosition.current = position;
+    setPlayProgress(position / duration);
+    if ((playingId === id || pausedId === id) && playbackRef.current?.seek) {
+      try {
+        await playbackRef.current.seek(position);
+        if (playingId !== id) {
+          await playbackRef.current.resume();
+          setPausedId(null);
+          setPlayingId(id);
+        }
+        return;
+      } catch {
+        // Start the note at the chosen spot.
+      }
+    }
+    try {
+      await startVoice(message, position);
+    } catch {
+      stopPlayback();
+      clearVoicePlace();
+      setPlayingId(null);
       Alert.alert('Voice message', 'Could not play that recording.');
     }
   }
@@ -872,8 +955,14 @@ export function ChatScreen({ navigation, route }) {
                 myId={user.id}
                 partnerName={title}
                 playing={playingId === (item.message.id || item.message.clientId)}
-                progress={playProgress}
+                progress={
+                  playingId === (item.message.id || item.message.clientId) ||
+                  pausedId === (item.message.id || item.message.clientId)
+                    ? playProgress
+                    : 0
+                }
                 onToggleVoice={toggleVoice}
+                onSeekVoice={seekVoice}
                 onDownloadVoice={(message) => downloadVoice(message, true)}
                 voiceReady={item.message.type !== 'voice' || Boolean(localVoiceUri(item.message))}
                 voiceDownloading={Boolean(item.message.id && voiceBusy[item.message.id])}

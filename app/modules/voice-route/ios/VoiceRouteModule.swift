@@ -37,6 +37,19 @@ public class VoiceRouteModule: Module {
       }
     }
 
+    Function("resume") {
+      DispatchQueue.main.async {
+        self.player?.play()
+      }
+    }
+
+    Function("seek") { (position: Double) in
+      DispatchQueue.main.async {
+        let seconds = max(0, position)
+        self.player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+      }
+    }
+
     Function("stop") {
       DispatchQueue.main.async {
         self.shutdown()
