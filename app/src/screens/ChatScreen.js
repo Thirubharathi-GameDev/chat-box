@@ -1,7 +1,19 @@
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, uploadMedia } from '../api';
 import { useAuth } from '../auth/AuthContext';
@@ -225,14 +237,17 @@ export function ChatScreen({ navigation }) {
       <View style={styles.screen}>
         <Header title="Chat" onBack={() => navigation.goBack()} />
         <View style={styles.center}>
-          <Text style={styles.empty}>Connect with someone to start chatting.</Text>
+          <Text style={styles.muted}>Connect with someone to start chatting.</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <Header
         title={conversation.partner.displayName}
         subtitle={connected ? undefined : 'Connecting…'}
@@ -244,6 +259,7 @@ export function ChatScreen({ navigation }) {
         </View>
       ) : (
         <FlatList
+          style={styles.flex}
           inverted
           data={feed}
           keyExtractor={(item) => item.key}
@@ -284,7 +300,7 @@ export function ChatScreen({ navigation }) {
           ) : null}
         </Pressable>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -293,10 +309,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  flex: {
+    flex: 1,
+  },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  muted: {
+    color: colors.muted,
+    textAlign: 'center',
+    paddingHorizontal: 28,
   },
   list: {
     paddingVertical: 10,
