@@ -13,8 +13,7 @@ import { MessageActions } from '../components/MessageActions';
 import { Header } from '../components/Header';
 import { MessageBubble } from '../components/MessageBubble';
 import { dayLabel, durationLabel, partnerTitle, presenceLabel, previewLabel } from '../format';
-import { watchEar } from '../earSensor';
-import { clearRouteOverride, setRouteOverride, speakerOn, speakerPreference, toggleSpeaker } from '../speaker';
+import { speakerOn, toggleSpeaker } from '../speaker';
 import { useChat } from '../state/ChatContext';
 import { font, useColors } from '../theme';
 import { KeyboardScreen } from '../useKeyboardInset';
@@ -611,34 +610,8 @@ export function ChatScreen({ navigation, route }) {
     }
   }
 
-  const sensorNear = useRef(false);
-  const holdRoute = useRef(false);
-
-  useEffect(() => {
-    if (!playingId) {
-      sensorNear.current = false;
-      holdRoute.current = false;
-      clearRouteOverride();
-      return undefined;
-    }
-    let routed = speakerPreference();
-    return watchEar((near) => {
-      sensorNear.current = near;
-      if (holdRoute.current) {
-        if (!near) holdRoute.current = false;
-        return;
-      }
-      const on = near ? false : speakerPreference();
-      if (on === routed) return;
-      routed = on;
-      setRouteOverride(on);
-      applySpeaker(on).catch(() => {});
-    });
-  }, [playingId]);
-
   async function switchSpeaker() {
     const on = toggleSpeaker();
-    holdRoute.current = sensorNear.current;
     try {
       await applySpeaker(on);
     } catch {
