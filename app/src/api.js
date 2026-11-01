@@ -34,10 +34,40 @@ export async function uploadProfilePhoto(token, uri) {
   return api('/api/me/photo', { token, method: 'POST', form });
 }
 
-export async function uploadMedia(token, uri, kind) {
+async function uploadThroughServer(token, uri, kind) {
   const name = uri.split('/').pop()?.split('?')[0] || (kind === 'image' ? 'photo.jpg' : 'voice.m4a');
   const type = kind === 'image' ? (name.endsWith('.png') ? 'image/png' : 'image/jpeg') : 'audio/mp4';
   const form = new FormData();
   form.append('file', { uri, name, type });
   return api('/api/media', { token, method: 'POST', form });
+}
+
+async function uploadVoiceDirect(token, uri) {
+  const signed = await api('/api/media/sign', { token, method: 'POST', body: { kind: 'voice' } });
+  const form = new FormData();
+  form.append('file', { uri, name: 'voice.m4a', type: 'audio/mp4' });
+  form.append('api_key', signed.apiKey);
+  form.append('timestamp', String(signed.timestamp));
+  form.append('signature', signed.signature);
+  form.append('folder', signed.folder);
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${signed.cloudName}/${signed.resourceType}/upload`,
+    { method: 'POST', body: form }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.secure_url) {
+    throw new Error(data?.error?.message || 'Upload failed');
+  }
+  return { url: data.secure_url, kind: 'voice' };
+}
+
+export async function uploadMedia(token, uri, kind) {
+  if (kind === 'voice') {
+    try {
+      return await uploadVoiceDirect(token, uri);
+    } catch {
+      return uploadThroughServer(token, uri, kind);
+    }
+  }
+  return uploadThroughServer(token, uri, kind);
 }

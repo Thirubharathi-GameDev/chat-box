@@ -25,6 +25,22 @@ function ensureConfig() {
   }
 }
 
+export function signUpload(folder) {
+  ensureConfig();
+  const timestamp = Math.round(Date.now() / 1000);
+  const signature = cloudinary.utils.api_sign_request(
+    { folder, timestamp },
+    process.env.CLOUDINARY_API_SECRET
+  );
+  return {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    timestamp,
+    folder,
+    signature,
+  };
+}
+
 export function uploadBuffer(buffer, { folder, resourceType }) {
   ensureConfig();
   return new Promise((resolve, reject) => {

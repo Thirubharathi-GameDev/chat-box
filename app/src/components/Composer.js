@@ -9,11 +9,11 @@ import {
 } from 'expo-audio';
 import { useEffect, useRef, useState } from 'react';
 import { useMemo } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { durationLabel } from '../format';
 import { font, useColors } from '../theme';
 import { EmojiPanel } from './EmojiPanel';
-import { downsampleLevels, normalizeMeter, Waveform } from './Waveform';
+import { downsampleLevels, normalizeMeter } from './Waveform';
 
 export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecording, disabled, reply, onCancelReply, draft = '', onDraft, editing, onCancelEdit, onSubmitEdit }) {
   const recorder = useAudioRecorder({
@@ -47,9 +47,13 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   const activeRef = useRef(false);
   const cancelRef = useRef(false);
   const startedAt = useRef(0);
+  const sessionRef = useRef(0);
   const samplesRef = useRef([]);
   const [elapsed, setElapsed] = useState(0);
   const [levels, setLevels] = useState([]);
+  const [armed, setArmed] = useState(false);
+  const slide = useRef(new Animated.Value(0)).current;
+  const armedRef = useRef(false);
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -118,6 +122,8 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
 
     cancelRef.current = false;
     activeRef.current = true;
+    const session = sessionRef.current + 1;
+    sessionRef.current = session;
     try {
       await setAudioModeAsync({
         allowsRecording: true,
@@ -127,7 +133,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
         shouldRouteThroughEarpiece: false,
       });
       await recorder.prepareToRecordAsync();
-      if (cancelRef.current) {
+      if (sessionRef.current !== session || cancelRef.current) {
         activeRef.current = false;
         return;
       }
@@ -154,6 +160,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     const cancelled = cancelRef.current;
     cancelRef.current = false;
     activeRef.current = false;
+    sessionRef.current += 1;
     setRecording(false);
     onRecording?.(false);
     try {
@@ -169,10 +176,41 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     await onVoice(recorder.uri, durationMs, waveform);
   }
 
-  function cancelRecording() {
-    cancelRef.current = true;
-    finishRecording();
-  }
+  const actions = useRef({});
+  actions.current = { begin: beginRecording, finish: finishRecording, disabled };
+  const micPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !actions.current.disabled,
+      onPanResponderGrant: () => {
+        slide.setValue(0);
+        armedRef.current = false;
+        setArmed(false);
+        actions.current.begin();
+      },
+      onPanResponderMove: (_, gesture) => {
+        const x = Math.max(-140, Math.min(0, gesture.dx));
+        slide.setValue(x);
+        const next = x <= -88;
+        if (next === armedRef.current) return;
+        armedRef.current = next;
+        cancelRef.current = next;
+        setArmed(next);
+      },
+      onPanResponderRelease: () => {
+        actions.current.finish();
+        slide.setValue(0);
+        armedRef.current = false;
+        setArmed(false);
+      },
+      onPanResponderTerminate: () => {
+        cancelRef.current = true;
+        actions.current.finish();
+        slide.setValue(0);
+        armedRef.current = false;
+        setArmed(false);
+      },
+    })
+  ).current;
 
   return (
     <View>
@@ -222,10 +260,9 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
           <View style={styles.recordSlot}>
             <View style={styles.dot} />
             <Text style={styles.timer}>{durationLabel(elapsed)}</Text>
-            <Waveform levels={levels.length ? levels : [0.12]} color={colors.danger} dim={colors.shell} />
-            <Pressable onPress={cancelRecording} hitSlop={8}>
-              <Text style={styles.cancel}>Cancel</Text>
-            </Pressable>
+            <Text style={[styles.slideHint, armed && styles.slideHintArmed]} numberOfLines={1}>
+              {armed ? 'Release to cancel' : '‹  Slide to cancel'}
+            </Text>
           </View>
         ) : (
           <TextInput
@@ -256,14 +293,11 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
             <Ionicons name="checkmark" size={18} color={colors.onAccent} />
           </Pressable>
         ) : (
-          <Pressable
-            style={styles.send}
-            onPressIn={beginRecording}
-            onPressOut={finishRecording}
-            disabled={disabled}
-          >
-            <Ionicons name="mic" size={20} color={colors.onAccent} />
-          </Pressable>
+          <Animated.View style={{ transform: [{ translateX: slide }] }} {...micPan.panHandlers}>
+            <View style={styles.send}>
+              <Ionicons name="mic" size={20} color={colors.onAccent} />
+            </View>
+          </Animated.View>
         )}
       </View>
     </View>
@@ -359,9 +393,14 @@ function makeStyles(colors) {
     backgroundColor: colors.danger,
     marginRight: 8,
   },
-  cancel: {
+  slideHint: {
+    flex: 1,
     color: colors.muted,
     fontFamily: font.semibold,
+    fontSize: 14,
+  },
+  slideHintArmed: {
+    color: colors.danger,
   },
   });
 }

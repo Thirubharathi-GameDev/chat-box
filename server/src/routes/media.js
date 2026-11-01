@@ -3,7 +3,7 @@ import multer from 'multer';
 import { Conversation } from '../models/Conversation.js';
 import { asyncHandler, HttpError } from '../errors.js';
 import { requireAuth } from '../middleware/auth.js';
-import { uploadBuffer } from '../services/cloudinary.js';
+import { signUpload, uploadBuffer } from '../services/cloudinary.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -35,6 +35,15 @@ function detectKind(file) {
 export const mediaRouter = Router();
 
 mediaRouter.use(requireAuth);
+
+mediaRouter.post(
+  '/sign',
+  asyncHandler(async (req, res) => {
+    const voice = req.body?.kind !== 'image';
+    const signed = signUpload(voice ? 'chatbox/voice' : 'chatbox/images');
+    res.json({ ...signed, resourceType: voice ? 'video' : 'image' });
+  })
+);
 
 mediaRouter.post(
   '/',
