@@ -16,7 +16,7 @@ function Receipt({ status, pending, failed }) {
   return <Ionicons name="checkmark" size={16} color={colors.muted} />;
 }
 
-function Quote({ reply, mine, partnerName }) {
+function Quote({ reply, mine, partnerName, onPress }) {
   const colors = useColors();
   if (!reply?.messageId) return null;
   const name = reply.senderId && reply.senderName
@@ -24,7 +24,8 @@ function Quote({ reply, mine, partnerName }) {
     : partnerName;
   const label = reply.type === 'image' ? 'Photo' : reply.type === 'voice' ? 'Voice message' : reply.text;
   return (
-    <View
+    <Pressable
+      onPress={() => onPress?.(reply.messageId)}
       style={{
         backgroundColor: colors.quote,
         borderLeftColor: mine ? colors.header : colors.teal,
@@ -41,7 +42,7 @@ function Quote({ reply, mine, partnerName }) {
       <Text style={{ color: colors.muted, fontFamily: font.medium, fontSize: 13 }} numberOfLines={2}>
         {label}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -57,6 +58,7 @@ export function MessageBubble({
   onOpenImage,
   onRetry,
   onReply,
+  onJump,
   onHold,
   highlight,
 }) {
@@ -129,6 +131,7 @@ export function MessageBubble({
             reply={message.replyTo ? { ...message.replyTo, senderName: replyName } : null}
             mine={mine}
             partnerName={partnerName}
+            onPress={onJump}
           />
           {message.type === 'image' && message.mediaUrl ? (
             <Pressable onPress={() => onOpenImage(displayUri(message))} onLongPress={() => onHold?.(message)} delayLongPress={280}>

@@ -323,8 +323,16 @@ export function ChatScreen({ navigation, route }) {
   }
 
   const focusTries = useRef(0);
+  const [focusTarget, setFocusTarget] = useState(null);
+
+  function focusMessage(id) {
+    if (!id) return;
+    focusTries.current = 0;
+    setFocusTarget({ id, n: Date.now() });
+  }
+
   useEffect(() => {
-    const focusId = route.params?.focusId;
+    const focusId = focusTarget?.id || route.params?.focusId;
     if (!focusId) {
       focusTries.current = 0;
       return undefined;
@@ -338,7 +346,8 @@ export function ChatScreen({ navigation, route }) {
         listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
       }, 220);
       setTimeout(() => setHighlightId((current) => (current === id ? null : current)), 1800);
-      navigation.setParams({ focusId: undefined });
+      setFocusTarget(null);
+      if (route.params?.focusId) navigation.setParams({ focusId: undefined });
       return undefined;
     }
     if (hasMore && focusTries.current < 8) {
@@ -346,9 +355,10 @@ export function ChatScreen({ navigation, route }) {
       loadOlder();
       return undefined;
     }
-    navigation.setParams({ focusId: undefined });
+    setFocusTarget(null);
+    if (route.params?.focusId) navigation.setParams({ focusId: undefined });
     return undefined;
-  }, [route.params?.focusId, loading, feed, hasMore, navigation]);
+  }, [focusTarget, route.params?.focusId, loading, feed, hasMore, navigation]);
 
   function markFailed(pendingId, local) {
     setMessages((prev) =>
@@ -803,6 +813,7 @@ export function ChatScreen({ navigation, route }) {
                 onToggleSpeaker={switchSpeaker}
                 onOpenImage={setViewer}
                 onReply={startReply}
+                onJump={focusMessage}
                 onHold={setHeld}
                 highlight={highlightId === item.message.id}
                 onRetry={() => item.message.local && sendPayload(item.message.local, item.message.clientId)}
