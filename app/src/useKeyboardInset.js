@@ -3,10 +3,12 @@ import { Dimensions, Keyboard, Platform, View } from 'react-native';
 
 function reportedHeight(event) {
   const frame = event?.endCoordinates || {};
-  const height = Math.round(frame.height || 0);
-  if (height > 0) return height;
-  if (typeof frame.screenY !== 'number') return 0;
-  return Math.max(0, Math.round(Dimensions.get('screen').height - frame.screenY));
+  const fromEvent = Math.round(frame.height || 0);
+  const screenHeight = Dimensions.get('screen').height;
+  const fromScreen = typeof frame.screenY === 'number' ? Math.max(0, Math.round(screenHeight - frame.screenY)) : 0;
+  const metrics = typeof Keyboard.metrics === 'function' ? Keyboard.metrics() : null;
+  const fromMetrics = Math.round(metrics?.height || 0);
+  return Math.max(fromEvent, fromScreen, fromMetrics);
 }
 
 export function KeyboardScreen({ children, style, footerInset = 0 }) {
@@ -18,20 +20,18 @@ export function KeyboardScreen({ children, style, footerInset = 0 }) {
   const [inset, setInset] = useState(0);
   const applyRef = useRef(() => {});
 
-  applyRef.current = (allowLift) => {
-    if (!open.current || keyboardHeight.current < 12) {
+  applyRef.current = () => {
+    const height = keyboardHeight.current;
+    if (!open.current || height < 12) {
       setInset(0);
       return;
     }
     const shrunk = Math.max(0, restHeight.current - layoutHeight.current);
-    const remaining = keyboardHeight.current - shrunk;
-    if (remaining < 48) {
-      setInset(0);
-      return;
-    }
-    if (!allowLift) return;
-    const limit = Math.round((restHeight.current || layoutHeight.current || 0) * 0.5);
-    setInset(limit > 0 ? Math.min(Math.round(remaining), limit) : Math.round(remaining));
+    // Edge-to-edge Android keeps the window height. A small layout change is
+    // not the keyboard, so the composer still needs the full keyboard inset.
+    const resized = shrunk > height * 0.6 ? shrunk : 0;
+    const remaining = Math.max(0, height - resized);
+    setInset(remaining < 24 ? 0 : remaining);
   };
 
   useEffect(() => {
@@ -41,8 +41,9 @@ export function KeyboardScreen({ children, style, footerInset = 0 }) {
       keyboardHeight.current = height;
       open.current = true;
       setKeyboardOpen(true);
-      setTimeout(() => applyRef.current(true), 80);
-      setTimeout(() => applyRef.current(true), 260);
+      applyRef.current();
+      setTimeout(() => applyRef.current(), 60);
+      setTimeout(() => applyRef.current(), 240);
     };
     const onHide = () => {
       open.current = false;
@@ -53,14 +54,16 @@ export function KeyboardScreen({ children, style, footerInset = 0 }) {
 
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, onShow);
-    const change = Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillChangeFrame', onShow) : null;
-    const hide = Keyboard.addListener(hideEvent, onHide);
+    const subscriptions = [
+      Keyboard.addListener(showEvent, onShow),
+      Keyboard.addListener(hideEvent, onHide),
+    ];
+    if (Platform.OS === 'ios') {
+      subscriptions.push(Keyboard.addListener('keyboardWillChangeFrame', onShow));
+    }
 
     return () => {
-      show.remove();
-      change?.remove();
-      hide.remove();
+      subscriptions.forEach((subscription) => subscription.remove());
     };
   }, []);
 
@@ -71,8 +74,8 @@ export function KeyboardScreen({ children, style, footerInset = 0 }) {
         const height = Math.round(event.nativeEvent.layout.height);
         if (height < 1) return;
         layoutHeight.current = height;
-        if (height > restHeight.current) restHeight.current = height;
-        if (open.current) applyRef.current(false);
+        if (!open.current && height > restHeight.current) restHeight.current = height;
+        if (open.current) applyRef.current();
       }}
       style={[{ flex: 1 }, style, { paddingBottom: keyboardOpen ? inset : footerInset }]}
     >

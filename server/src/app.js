@@ -33,7 +33,11 @@ export function createServer() {
   });
 
   const server = http.createServer(app);
-  const io = new Server(server, { cors: { origin: '*' } });
+  const io = new Server(server, {
+    cors: { origin: '*' },
+    pingInterval: 25000,
+    pingTimeout: 60000,
+  });
   attachSocket(io);
   return { app, server, io };
 }

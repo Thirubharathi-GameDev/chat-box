@@ -16,7 +16,27 @@ import { EmojiPanel } from './EmojiPanel';
 import { downsampleLevels, normalizeMeter, Waveform } from './Waveform';
 
 export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecording, disabled, reply, onCancelReply, draft = '', onDraft, editing, onCancelEdit, onSubmitEdit }) {
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    isMeteringEnabled: true,
+    numberOfChannels: 1,
+    bitRate: 32000,
+    sampleRate: 22050,
+    android: {
+      ...RecordingPresets.HIGH_QUALITY.android,
+      sampleRate: 22050,
+      bitRate: 32000,
+    },
+    ios: {
+      ...RecordingPresets.HIGH_QUALITY.ios,
+      sampleRate: 22050,
+      bitRate: 32000,
+    },
+    web: {
+      mimeType: 'audio/webm',
+      bitsPerSecond: 32000,
+    },
+  });
   const recorderState = useAudioRecorderState(recorder, 80);
   const [text, setText] = useState(draft);
   const textRef = useRef(draft);

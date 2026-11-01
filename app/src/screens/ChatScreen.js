@@ -372,7 +372,9 @@ export function ChatScreen({ navigation, route }) {
   async function emitMessage(payload) {
     if (!socket?.connected) throw new Error('Not connected.');
     return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Not connected.')), 20000);
       socket.emit('message:send', payload, (ack) => {
+        clearTimeout(timer);
         if (!ack?.ok) reject(new Error(ack?.error || 'Could not send.'));
         else resolve(ack.message);
       });
@@ -408,7 +410,6 @@ export function ChatScreen({ navigation, route }) {
 
   async function sendPayload(local, pendingId = clientId(), { quiet = false } = {}) {
     setReplying((current) => (current?.id === local.reply?.id ? null : current));
-    const online = Boolean(socket?.connected);
     const existing = messagesRef.current.find((item) => item.clientId === pendingId);
     const optimistic = {
       clientId: pendingId,
@@ -431,7 +432,7 @@ export function ChatScreen({ navigation, route }) {
       localPath: existing?.localPath || local.uri || '',
       createdAt: existing?.createdAt || new Date().toISOString(),
       pending: true,
-      waiting: !online,
+      waiting: false,
       failed: false,
       local,
     };
@@ -446,13 +447,19 @@ export function ChatScreen({ navigation, route }) {
         );
       });
     }
-    if (!online) return 'offline';
-
     try {
       let mediaUrl = local.mediaUrl || '';
       if ((local.type === 'image' || local.type === 'voice') && local.uri && !mediaUrl) {
         const uploaded = await uploadMedia(token, local.uri, local.type);
         mediaUrl = uploaded.url;
+        local = { ...local, mediaUrl };
+        setMessages((prev) =>
+          prev.map((item) => (item.clientId === pendingId ? { ...item, local } : item))
+        );
+      }
+      if (!socket?.connected) {
+        markWaiting(pendingId, local);
+        return 'offline';
       }
       let saved = await emitMessage({
         conversationId,
