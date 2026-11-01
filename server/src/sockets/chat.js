@@ -145,9 +145,17 @@ async function publishReceipts(readerId, conversationId, status) {
   });
 }
 
+export async function acknowledgeDelivery(userId) {
+  const user = await User.findById(userId).select('partnerId');
+  if (!user?.partnerId) return;
+  const conversation = await Conversation.findOne({ participants: user._id }).select('_id');
+  if (!conversation) return;
+  await publishReceipts(userId, conversation._id, 'delivered');
+}
+
 async function notifyPartner(user, conversation, message) {
   const partnerId = conversation.participants.find((id) => !id.equals(user._id));
-  if (!partnerId || isUserOnline(partnerId)) return;
+  if (!partnerId || isViewing(partnerId, conversation._id)) return;
 
   const partner = await User.findById(partnerId).select('pushToken partnerNickname');
   if (!partner?.pushToken) return;

@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { uploadBuffer } from '../services/cloudinary.js';
 import { User } from '../models/User.js';
 import { publicUser } from '../services/serialize.js';
-import { emitProfileUpdate } from '../sockets/chat.js';
+import { acknowledgeDelivery, emitProfileUpdate } from '../sockets/chat.js';
 import { assertDisplayName, assertNickname } from '../validate.js';
 
 const upload = multer({
@@ -76,6 +76,14 @@ meRouter.post(
     await req.user.save();
     emitProfileUpdate(req.user);
     res.json({ user: publicUser(req.user) });
+  })
+);
+
+meRouter.post(
+  '/delivered',
+  asyncHandler(async (req, res) => {
+    await acknowledgeDelivery(req.user._id);
+    res.json({ ok: true });
   })
 );
 

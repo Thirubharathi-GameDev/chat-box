@@ -18,6 +18,14 @@ try {
   // Remote notifications are not available inside Expo Go.
 }
 
+export function watchDelivery(authToken) {
+  if (!authToken) return () => {};
+  const received = Notifications.addNotificationReceivedListener(() => {
+    api('/api/me/delivered', { token: authToken, method: 'POST', body: {} }).catch(() => {});
+  });
+  return () => received.remove();
+}
+
 export async function setAppBadge(count) {
   try {
     await Notifications.setBadgeCountAsync(Math.max(0, Number(count) || 0));

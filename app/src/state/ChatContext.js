@@ -5,7 +5,7 @@ import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { getApiUrl } from '../config';
 import { previewLabel } from '../format';
-import { loadPushEnabled, setAppBadge, syncAccountPush } from '../notifications';
+import { loadPushEnabled, setAppBadge, syncAccountPush, watchDelivery } from '../notifications';
 import { loadConversation, loadDraft, saveConversation, saveDraft } from '../cache';
 import { loadSpeakerPreference } from '../speaker';
 
@@ -224,6 +224,11 @@ export function ChatProvider({ children }) {
     }
     setAppBadge(conversation?.stats?.unread || 0);
   }, [signedIn, conversation?.stats?.unread]);
+
+  useEffect(() => {
+    if (!signedIn || !token) return undefined;
+    return watchDelivery(token);
+  }, [signedIn, token]);
 
   useEffect(() => {
     if (!signedIn || !user?.id) return undefined;

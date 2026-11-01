@@ -52,11 +52,18 @@ async function sendExpoPush(token, { title, body, data, badge }) {
       body,
       sound: 'default',
       badge,
+      channelId: 'messages',
+      priority: 'high',
       data,
     }),
   });
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new Error(payload?.errors?.[0]?.message || 'Expo push was rejected.');
+  }
+  const ticket = Array.isArray(payload?.data) ? payload.data[0] : payload?.data;
+  if (ticket?.status === 'error') {
+    throw new Error(ticket.details?.error || ticket.message || 'Expo push was rejected.');
   }
 }
 
@@ -67,7 +74,9 @@ export async function sendPush(token, { title, body, data, badge = 0 }) {
     await sendExpoPush(token, { title, body, data, badge: count });
     return;
   }
-  if (!firebaseReady) return;
+  if (!firebaseReady) {
+    throw new Error('Firebase is not configured on the server.');
+  }
 
   const stringData = {};
   for (const [key, value] of Object.entries(data || {})) {
