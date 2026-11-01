@@ -67,6 +67,17 @@ export function HomeScreen({ navigation }) {
   const live = Boolean(conversation?.partner.online || partnerActivity);
   const lastText = !preview ? 'No messages yet' : preview.deleted ? 'This message was deleted' : previewLabel(preview);
   const unreadText = conversation?.unreadMessage ? previewLabel(conversation.unreadMessage) : '';
+  const hasUnread = stats.unread > 0 && Boolean(unreadText);
+  const activity = partnerActivity === 'recording' ? 'recording audio…' : partnerActivity === 'typing' ? 'typing…' : '';
+  const shownText = activity || (hasUnread ? unreadText : lastText);
+  const shownTime = hasUnread ? listTime(conversation.unreadMessage.createdAt) : listTime(preview?.createdAt);
+  const shownLabel = hasUnread
+    ? `${stats.unread} unread`
+    : preview
+      ? mine
+        ? 'You sent'
+        : `${title} sent`
+      : 'Last message';
 
   return (
     <View style={styles.screen}>
@@ -106,33 +117,18 @@ export function HomeScreen({ navigation }) {
 
             <View style={styles.block}>
               <View style={styles.blockTop}>
-                <Text style={styles.blockLabel}>{preview ? (mine ? 'You sent' : `${title} sent`) : 'Last message'}</Text>
-                <Text style={styles.time}>{listTime(preview?.createdAt)}</Text>
+                <Text style={[styles.blockLabel, hasUnread && styles.blockLabelUnread]}>{shownLabel}</Text>
+                <Text style={styles.time}>{shownTime}</Text>
               </View>
               <View style={styles.messageRow}>
-                {preview?.deleted && partnerActivity !== 'recording' && partnerActivity !== 'typing' ? (
+                {!activity && !hasUnread && preview?.deleted ? (
                   <Ionicons name="ban-outline" size={16} color={colors.muted} />
                 ) : null}
-                <Text style={[styles.message, preview?.deleted && styles.deletedMessage]} numberOfLines={3}>
-                  {partnerActivity === 'recording'
-                    ? 'recording audio…'
-                    : partnerActivity === 'typing'
-                      ? 'typing…'
-                      : lastText}
+                <Text style={[styles.message, !activity && !hasUnread && preview?.deleted && styles.deletedMessage]} numberOfLines={3}>
+                  {shownText}
                 </Text>
               </View>
             </View>
-
-            {stats.unread > 0 ? (
-              <View style={styles.unread}>
-                <Text style={styles.unreadCount}>
-                  {stats.unread} unread
-                </Text>
-                <Text style={styles.unreadText} numberOfLines={2}>
-                  {unreadText}
-                </Text>
-              </View>
-            ) : null}
 
             {draftLine ? (
               <Text style={styles.draft} numberOfLines={2}>
@@ -273,6 +269,9 @@ function makeHomeStyles(colors) {
       fontFamily: font.bold,
       fontSize: 13,
     },
+    blockLabelUnread: {
+      color: colors.green,
+    },
     time: {
       color: colors.muted,
       fontFamily: font.medium,
@@ -294,25 +293,6 @@ function makeHomeStyles(colors) {
     deletedMessage: {
       color: colors.muted,
       fontStyle: 'italic',
-    },
-    unread: {
-      marginTop: 12,
-      padding: 14,
-      borderRadius: 18,
-      backgroundColor: colors.quote,
-      borderLeftWidth: 3,
-      borderLeftColor: colors.green,
-    },
-    unreadCount: {
-      color: colors.green,
-      fontFamily: font.bold,
-      fontSize: 13,
-    },
-    unreadText: {
-      marginTop: 4,
-      color: colors.text,
-      fontFamily: font.medium,
-      fontSize: 15,
     },
     buttonGap: {
       height: 16,
