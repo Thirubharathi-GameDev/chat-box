@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "347125079754",
+    "project_id": "kin-chat-box",
+    "storage_bucket": "kin-chat-box.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:347125079754:android:1fc1e5c2855a2902471e33",
+        "android_client_info": {
+          "package_name": "com.chatbox.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBDETjPsaftOMpgubhl3z69Es3PuA3H82Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

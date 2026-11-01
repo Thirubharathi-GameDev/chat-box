@@ -64,7 +64,7 @@ export function LoginScreen() {
               label="Password"
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              revealable
               placeholder="At least 6 characters"
             />
             {error ? (

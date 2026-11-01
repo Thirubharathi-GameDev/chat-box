@@ -1,8 +1,12 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { font, useColors } from '../theme';
 
-export function Field({ label, ...inputProps }) {
+export function Field({ label, revealable = false, secureTextEntry, ...inputProps }) {
   const colors = useColors();
+  const [hidden, setHidden] = useState(true);
+  const secure = revealable ? hidden : secureTextEntry;
   return (
     <View style={{ marginBottom: 14 }}>
       {label ? (
@@ -20,19 +24,40 @@ export function Field({ label, ...inputProps }) {
         </Text>
       ) : null}
       <View style={{ backgroundColor: colors.shell, borderRadius: 22, padding: 5 }}>
-        <TextInput
-          placeholderTextColor={colors.muted}
-          {...inputProps}
+        <View
           style={{
+            flexDirection: 'row',
+            alignItems: 'center',
             backgroundColor: colors.surface,
             borderRadius: 17,
-            paddingHorizontal: 16,
-            paddingVertical: 14,
-            fontSize: 16,
-            color: colors.text,
-            fontFamily: font.medium,
           }}
-        />
+        >
+          <TextInput
+            placeholderTextColor={colors.muted}
+            secureTextEntry={secure}
+            {...inputProps}
+            style={{
+              flex: 1,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              paddingRight: revealable ? 8 : 16,
+              fontSize: 16,
+              color: colors.text,
+              fontFamily: font.medium,
+            }}
+          />
+          {revealable ? (
+            <Pressable
+              onPress={() => setHidden((value) => !value)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
+              style={{ paddingRight: 14, paddingLeft: 4 }}
+            >
+              <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={22} color={colors.muted} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     </View>
   );

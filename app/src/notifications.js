@@ -47,19 +47,19 @@ export async function savePushEnabled(userId, enabled) {
 }
 
 export async function syncAccountPush({ authToken, enabled }) {
-  if (!authToken) return { registered: false };
+  if (!authToken) return { registered: false, reason: 'auth' };
   if (!enabled) {
     await api('/api/me/push-token', { token: authToken, method: 'POST', body: { token: '' } });
-    return { registered: false };
+    return { registered: false, reason: null };
   }
-  const pushToken = await registerForPush();
-  if (!pushToken) return { registered: false };
-  await api('/api/me/push-token', { token: authToken, method: 'POST', body: { token: pushToken } });
-  return { registered: true };
+  const result = await registerForPush();
+  if (!result.token) return { registered: false, reason: result.reason };
+  await api('/api/me/push-token', { token: authToken, method: 'POST', body: { token: result.token } });
+  return { registered: true, reason: null };
 }
 
 export async function registerForPush() {
-  if (!Device.isDevice) return null;
+  if (!Device.isDevice) return { token: null, reason: 'device' };
 
   try {
     if (Platform.OS === 'android') {
@@ -77,19 +77,25 @@ export async function registerForPush() {
       const asked = await Notifications.requestPermissionsAsync();
       status = asked.status;
     }
-    if (status !== 'granted') return null;
+    if (status !== 'granted') return { token: null, reason: 'permission' };
 
     try {
       const device = await Notifications.getDevicePushTokenAsync();
-      if (device?.data) return String(device.data);
+      if (device?.data) return { token: String(device.data), reason: null };
     } catch {
-      // Expo Go cannot mint a Firebase device token.
+      // This install has no Firebase Android config, so there is no device token.
     }
 
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-    const expoToken = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
-    return expoToken?.data || null;
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+      const expoToken = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+      if (expoToken?.data) return { token: expoToken.data, reason: null };
+    } catch {
+      // Expo push also needs the Firebase Android file in the build.
+    }
+
+    return { token: null, reason: 'firebase' };
   } catch {
-    return null;
+    return { token: null, reason: 'firebase' };
   }
 }

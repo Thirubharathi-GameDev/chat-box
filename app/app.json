@@ -23,6 +23,7 @@
     "android": {
       "package": "com.chatbox.app",
       "softwareKeyboardLayoutMode": "resize",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -45,7 +46,7 @@
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/replace-after-eas-init"
+      "url": "https://u.expo.dev/6f2c239e-a0b4-45fa-8467-34fec38be28a"
     },
     "owner": "thirubharathi",
     "plugins": [

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { api, uploadProfilePhoto } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { Avatar } from '../components/Avatar';
@@ -45,7 +45,21 @@ export function ProfileScreen({ navigation }) {
       if (next && !result.registered) {
         setPushOn(false);
         await savePushEnabled(user.id, false);
-        Alert.alert('Notifications', 'Allow notifications for Kin to turn this on.');
+        if (result.reason === 'permission') {
+          Alert.alert(
+            'Notifications',
+            'Allow notifications for Kin in your phone settings, then turn this on again.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Notifications',
+            'This install could not register the phone with Firebase, so push stays off.'
+          );
+        }
       }
     } catch (err) {
       setPushOn(!next);
