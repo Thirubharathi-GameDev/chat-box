@@ -12,7 +12,7 @@ import { Composer } from '../components/Composer';
 import { MessageActions } from '../components/MessageActions';
 import { Header } from '../components/Header';
 import { MessageBubble } from '../components/MessageBubble';
-import { dayLabel, partnerTitle, presenceLabel, previewLabel } from '../format';
+import { dayLabel, durationLabel, partnerTitle, presenceLabel, previewLabel } from '../format';
 import { watchEar } from '../earSensor';
 import { clearRouteOverride, setRouteOverride, speakerOn, speakerPreference, toggleSpeaker } from '../speaker';
 import { useChat } from '../state/ChatContext';
@@ -23,6 +23,20 @@ import { createVoiceController } from '../voicePlayback';
 
 function clientId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function localVoiceUri(message) {
+  const candidates = [message?.localPath, message?.local?.uri, message?.mediaUrl];
+  return candidates.find((value) => value && !/^https?:/i.test(value)) || '';
+}
+
+function patchVoiceReply(message, all) {
+  const reply = message?.replyTo;
+  if (!reply || reply.type !== 'voice') return message;
+  if (reply.text && reply.text !== 'Voice message') return message;
+  const original = all.find((item) => item.id === reply.messageId);
+  if (!original?.durationMs) return message;
+  return { ...message, replyTo: { ...reply, text: durationLabel(original.durationMs) } };
 }
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 };
@@ -41,6 +55,7 @@ export function ChatScreen({ navigation, route }) {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState(null);
+  const [voiceBusy, setVoiceBusy] = useState({});
   const [playProgress, setPlayProgress] = useState(0);
   const [viewer, setViewer] = useState(null);
   const [replying, setReplying] = useState(null);
@@ -282,6 +297,50 @@ export function ChatScreen({ navigation, route }) {
     return () => clearTimeout(timer);
   }, [messages, user?.id, conversationId]);
 
+  const voiceJobs = useRef(new Set());
+  const voiceMiss = useRef(new Set());
+  const wasConnected = useRef(false);
+
+  async function downloadVoice(message, manual = false) {
+    const id = message?.id;
+    if (!id || message.type !== 'voice' || !message.mediaUrl || localVoiceUri(message)) return;
+    if (voiceJobs.current.has(id)) return;
+    if (!manual && !connected) return;
+    voiceMiss.current.delete(id);
+    voiceJobs.current.add(id);
+    setVoiceBusy((current) => ({ ...current, [id]: true }));
+    try {
+      const path = await persistMedia(message.mediaUrl, id, 'voice');
+      if (!path) {
+        voiceJobs.current.delete(id);
+        voiceMiss.current.add(id);
+        return;
+      }
+      setMessages((prev) => prev.map((item) => (item.id === id ? { ...item, localPath: path } : item)));
+    } catch {
+      voiceJobs.current.delete(id);
+      voiceMiss.current.add(id);
+    } finally {
+      setVoiceBusy((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
+  }
+
+  useEffect(() => {
+    if (connected && !wasConnected.current) voiceMiss.current.clear();
+    wasConnected.current = connected;
+    if (!connected) return undefined;
+    messages.forEach((message) => {
+      if (message.type !== 'voice' || !message.id || !message.mediaUrl || localVoiceUri(message)) return;
+      if (voiceJobs.current.has(message.id) || voiceMiss.current.has(message.id)) return;
+      downloadVoice(message);
+    });
+    return undefined;
+  }, [connected, messages]);
+
   const feed = useMemo(() => {
     const items = [];
     let lastDay = '';
@@ -410,7 +469,7 @@ export function ChatScreen({ navigation, route }) {
       id: message.id,
       senderId: message.senderId,
       type: message.type,
-      text: message.type === 'text' ? message.text : previewLabel(message),
+      text: message.type === 'voice' ? durationLabel(message.durationMs) : message.type === 'text' ? message.text : previewLabel(message),
       mediaUrl: message.type === 'image' ? message.mediaUrl : '',
       author: message.senderId === user.id ? 'You' : partnerTitle(conversation?.partner),
     };
@@ -419,6 +478,10 @@ export function ChatScreen({ navigation, route }) {
   }
 
   async function sendPayload(local, pendingId = clientId(), { quiet = false } = {}) {
+    if (local.type === 'voice' && local.uri && !/^https?:/i.test(local.uri)) {
+      const saved = await persistMedia(local.uri, pendingId, 'voice');
+      if (saved) local = { ...local, uri: saved };
+    }
     setReplying((current) => (current?.id === local.reply?.id ? null : current));
     const existing = messagesRef.current.find((item) => item.clientId === pendingId);
     const optimistic = {
@@ -588,7 +651,8 @@ export function ChatScreen({ navigation, route }) {
       setPlayProgress(0);
       return;
     }
-    const uri = displayUri(message);
+    const uri = localVoiceUri(message);
+    if (!uri) return;
     try {
       stopPlayback();
       const controller = createVoiceController({
@@ -746,7 +810,7 @@ export function ChatScreen({ navigation, route }) {
 
   const title = partnerTitle(conversation.partner);
   const quote = replying
-    ? { author: replying.author, text: replying.text }
+    ? { author: replying.author, text: replying.text, type: replying.type }
     : null;
 
   const statusLine = connected
@@ -803,13 +867,16 @@ export function ChatScreen({ navigation, route }) {
               </View>
             ) : (
               <MessageBubble
-                message={item.message}
+                message={patchVoiceReply(item.message, messages)}
                 mine={item.message.senderId === user.id}
                 myId={user.id}
                 partnerName={title}
                 playing={playingId === (item.message.id || item.message.clientId)}
                 progress={playProgress}
                 onToggleVoice={toggleVoice}
+                onDownloadVoice={(message) => downloadVoice(message, true)}
+                voiceReady={item.message.type !== 'voice' || Boolean(localVoiceUri(item.message))}
+                voiceDownloading={Boolean(item.message.id && voiceBusy[item.message.id])}
                 onToggleSpeaker={switchSpeaker}
                 onOpenImage={setViewer}
                 onReply={startReply}

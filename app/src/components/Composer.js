@@ -9,7 +9,7 @@ import {
 } from 'expo-audio';
 import { useEffect, useRef, useState } from 'react';
 import { useMemo } from 'react';
-import { Alert, Animated, PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { durationLabel } from '../format';
 import { font, useColors } from '../theme';
 import { EmojiPanel } from './EmojiPanel';
@@ -39,6 +39,8 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   });
   const recorderState = useAudioRecorderState(recorder, 80);
   const [text, setText] = useState(draft);
+  const inputRef = useRef(null);
+  const keepFocus = useRef(false);
   const textRef = useRef(draft);
   const dirty = useRef(false);
   textRef.current = text;
@@ -113,6 +115,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     if (disabled || activeRef.current) return;
     const current = await getRecordingPermissionsAsync();
     if (!current.granted) {
+      keepFocus.current = false;
       const asked = await requestRecordingPermissionsAsync();
       if (!asked.granted) {
         Alert.alert('Microphone', 'Allow microphone access to send voice messages.');
@@ -155,6 +158,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   async function finishRecording() {
     if (!activeRef.current) {
       cancelRef.current = true;
+      releaseKeyboard();
       return;
     }
     const cancelled = cancelRef.current;
@@ -163,24 +167,47 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     sessionRef.current += 1;
     setRecording(false);
     onRecording?.(false);
+    let uri = '';
+    let durationMs = 0;
+    let waveform = [];
     try {
       if (recorder.isRecording) await recorder.stop();
+      durationMs = Date.now() - startedAt.current;
+      waveform = downsampleLevels(samplesRef.current, 36).map((level) => Math.round(level * 100));
+      uri = recorder.uri || '';
     } catch {
-      return;
+      uri = '';
+    } finally {
+      samplesRef.current = [];
+      setLevels([]);
+      releaseKeyboard();
     }
-    const durationMs = Date.now() - startedAt.current;
-    const waveform = downsampleLevels(samplesRef.current, 36).map((level) => Math.round(level * 100));
-    samplesRef.current = [];
-    setLevels([]);
-    if (cancelled || durationMs < 700 || !recorder.uri) return;
-    await onVoice(recorder.uri, durationMs, waveform);
+    if (cancelled || durationMs < 700 || !uri) return;
+    await onVoice(uri, durationMs, waveform);
+  }
+
+  function holdKeyboard() {
+    keepFocus.current = true;
+    inputRef.current?.focus();
+  }
+
+  function releaseKeyboard() {
+    inputRef.current?.focus();
+    setTimeout(() => {
+      keepFocus.current = false;
+    }, 400);
   }
 
   const actions = useRef({});
-  actions.current = { begin: beginRecording, finish: finishRecording, disabled };
+  actions.current = { begin: beginRecording, finish: finishRecording, holdKeyboard, disabled };
   const micPan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !actions.current.disabled,
+      onStartShouldSetPanResponder: () => {
+        if (actions.current.disabled) return false;
+        actions.current.holdKeyboard();
+        return true;
+      },
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         slide.setValue(0);
         armedRef.current = false;
@@ -203,7 +230,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
         setArmed(false);
       },
       onPanResponderTerminate: () => {
-        cancelRef.current = true;
+        if (!armedRef.current) cancelRef.current = false;
         actions.current.finish();
         slide.setValue(0);
         armedRef.current = false;
@@ -213,7 +240,7 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   ).current;
 
   return (
-    <View>
+    <ScrollView keyboardShouldPersistTaps="always" keyboardDismissMode="none" scrollEnabled={false} bounces={false} style={styles.wrap}>
       {emojiOpen ? <EmojiPanel onPick={(emoji) => updateText(`${textRef.current}${emoji}`)} /> : null}
       {editing?.id && !recording ? (
         <View style={styles.reply}>
@@ -241,9 +268,12 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
             <Text style={styles.replyName} numberOfLines={1}>
               {reply.author}
             </Text>
-            <Text style={styles.replyText} numberOfLines={1}>
-              {reply.text}
-            </Text>
+            <View style={styles.replyLine}>
+              {reply.type === 'voice' ? <Ionicons name="mic" size={14} color={colors.muted} /> : null}
+              <Text style={styles.replyText} numberOfLines={1}>
+                {reply.text}
+              </Text>
+            </View>
           </View>
           <Pressable onPress={onCancelReply} hitSlop={8}>
             <Ionicons name="close" size={20} color={colors.muted} />
@@ -256,29 +286,36 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
             <Ionicons name={emojiOpen ? 'keypad-outline' : 'happy-outline'} size={26} color={colors.muted} />
           </Pressable>
         )}
-        {recording ? (
-          <View style={styles.recordSlot}>
-            <View style={styles.dot} />
-            <Text style={styles.timer}>{durationLabel(elapsed)}</Text>
-            <Text style={[styles.slideHint, armed && styles.slideHintArmed]} numberOfLines={1}>
-              {armed ? 'Release to cancel' : '‹  Slide to cancel'}
-            </Text>
-          </View>
-        ) : (
+        <View style={styles.field}>
           <TextInput
+            ref={inputRef}
             value={text}
             onChangeText={(value) => {
               updateText(value);
               onTyping?.(Boolean(value.trim()));
             }}
+            onBlur={() => {
+              if (!keepFocus.current) return;
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
             placeholder="Message"
             placeholderTextColor={colors.muted}
-            style={styles.input}
+            style={[styles.input, recording && styles.inputHidden]}
             multiline
             maxLength={4000}
+            blurOnSubmit={false}
             editable={!disabled}
           />
-        )}
+          {recording ? (
+            <View pointerEvents="none" style={styles.recordSlot}>
+              <View style={styles.dot} />
+              <Text style={styles.timer}>{durationLabel(elapsed)}</Text>
+              <Text style={[styles.slideHint, armed && styles.slideHintArmed]} numberOfLines={1}>
+                {armed ? 'Release to cancel' : '‹  Slide to cancel'}
+              </Text>
+            </View>
+          ) : null}
+        </View>
         {recording || editing?.id ? null : (
           <Pressable style={styles.icon} onPress={onPickImage} disabled={disabled}>
             <Ionicons name="image-outline" size={26} color={colors.muted} />
@@ -300,12 +337,15 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
           </Animated.View>
         )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 function makeStyles(colors) {
   return StyleSheet.create({
+  wrap: {
+    flexGrow: 0,
+  },
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -313,8 +353,12 @@ function makeStyles(colors) {
     paddingTop: 8,
     backgroundColor: colors.background,
   },
-  input: {
+  field: {
     flex: 1,
+    marginHorizontal: 4,
+    justifyContent: 'flex-end',
+  },
+  input: {
     maxHeight: 120,
     backgroundColor: colors.surface,
     borderRadius: 22,
@@ -323,11 +367,13 @@ function makeStyles(colors) {
     paddingBottom: 10,
     fontSize: 16,
     color: colors.text,
-    marginHorizontal: 4,
     fontFamily: font.medium,
   },
+  inputHidden: {
+    opacity: 0,
+  },
   recordSlot: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
@@ -335,7 +381,6 @@ function makeStyles(colors) {
     backgroundColor: colors.surface,
     borderRadius: 22,
     paddingHorizontal: 12,
-    marginHorizontal: 4,
   },
   icon: {
     width: 40,
@@ -376,10 +421,16 @@ function makeStyles(colors) {
     fontFamily: font.bold,
     fontSize: 13,
   },
+  replyLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   replyText: {
     color: colors.muted,
     fontFamily: font.medium,
     fontSize: 13,
+    flexShrink: 1,
   },
   timer: {
     color: colors.danger,

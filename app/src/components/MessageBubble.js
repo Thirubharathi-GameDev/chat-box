@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useRef } from 'react';
-import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { displayUri } from '../cache';
 import { durationLabel, timeLabel } from '../format';
 import { useSpeaker } from '../speaker';
@@ -22,7 +22,8 @@ function Quote({ reply, mine, partnerName, onPress }) {
   const name = reply.senderId && reply.senderName
     ? reply.senderName
     : partnerName;
-  const label = reply.type === 'image' ? 'Photo' : reply.type === 'voice' ? 'Voice message' : reply.text;
+  const voice = reply.type === 'voice';
+  const label = reply.type === 'image' ? 'Photo' : voice ? reply.text || 'Voice message' : reply.text;
   return (
     <Pressable
       onPress={() => onPress?.(reply.messageId)}
@@ -39,9 +40,18 @@ function Quote({ reply, mine, partnerName, onPress }) {
       <Text style={{ color: colors.teal, fontFamily: font.bold, fontSize: 13 }} numberOfLines={1}>
         {name || 'Message'}
       </Text>
-      <Text style={{ color: colors.muted, fontFamily: font.medium, fontSize: 13 }} numberOfLines={2}>
-        {label}
-      </Text>
+      {voice ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Ionicons name="mic" size={14} color={colors.muted} />
+          <Text style={{ color: colors.muted, fontFamily: font.medium, fontSize: 13 }} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      ) : (
+        <Text style={{ color: colors.muted, fontFamily: font.medium, fontSize: 13 }} numberOfLines={2}>
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -54,6 +64,9 @@ export function MessageBubble({
   playing,
   progress,
   onToggleVoice,
+  onDownloadVoice,
+  voiceReady,
+  voiceDownloading,
   onToggleSpeaker,
   onOpenImage,
   onRetry,
@@ -140,19 +153,29 @@ export function MessageBubble({
           ) : null}
           {message.type === 'voice' ? (
             <View style={styles.voice}>
-              <Pressable onPress={() => onToggleVoice(message)} hitSlop={6}>
-                <Ionicons name={playing ? 'pause' : 'play'} size={26} color={colors.header} />
-              </Pressable>
+              {voiceDownloading ? (
+                <ActivityIndicator size="small" color={colors.header} style={styles.voiceAction} />
+              ) : voiceReady ? (
+                <Pressable onPress={() => onToggleVoice(message)} hitSlop={6} style={styles.voiceAction}>
+                  <Ionicons name={playing ? 'pause' : 'play'} size={26} color={colors.header} />
+                </Pressable>
+              ) : (
+                <Pressable onPress={() => onDownloadVoice?.(message)} hitSlop={6} style={styles.voiceAction}>
+                  <Ionicons name="download-outline" size={24} color={colors.header} />
+                </Pressable>
+              )}
               <Waveform
                 levels={message.waveform}
-                progress={playing ? progress : 0}
+                progress={voiceReady && playing ? progress : 0}
                 color={colors.teal}
                 dim={colors.shell}
               />
               <Text style={styles.duration}>{durationLabel(message.durationMs)}</Text>
-              <Pressable onPress={onToggleSpeaker} hitSlop={8} style={styles.speaker}>
-                <Ionicons name={speaker ? 'volume-high' : 'ear-outline'} size={18} color={colors.header} />
-              </Pressable>
+              {voiceReady ? (
+                <Pressable onPress={onToggleSpeaker} hitSlop={8} style={styles.speaker}>
+                  <Ionicons name={speaker ? 'volume-high' : 'ear-outline'} size={18} color={colors.header} />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
           {moment ? (
@@ -163,6 +186,9 @@ export function MessageBubble({
             </>
           )}
           <View style={styles.meta}>
+            {message.type === 'voice' && pending && !failed && !waiting ? (
+              <ActivityIndicator size="small" color={colors.teal} />
+            ) : null}
             {failed ? <Text style={styles.failed}>Failed · tap to retry</Text> : null}
             {message.edited && !message.deleted ? <Text style={styles.edited}>Edited</Text> : null}
             <Text style={[styles.time, waiting && { color: colors.teal }]}>
@@ -322,6 +348,12 @@ function makeStyles(colors) {
     width: 230,
     paddingVertical: 4,
     gap: 6,
+  },
+  voiceAction: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   speaker: {
     padding: 2,

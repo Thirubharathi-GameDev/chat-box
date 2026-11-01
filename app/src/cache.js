@@ -198,7 +198,7 @@ export function applyMarks(messages, marks) {
 export async function warmMedia(messages) {
   const next = [];
   for (const message of messages) {
-    if ((message.type !== 'image' && message.type !== 'voice') || message.localPath || !message.mediaUrl || !message.id) {
+    if (message.type !== 'image' || message.localPath || !message.mediaUrl || !message.id) {
       next.push(message);
       continue;
     }

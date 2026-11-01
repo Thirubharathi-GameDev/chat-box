@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
@@ -254,6 +255,9 @@ export function ProfileScreen({ navigation }) {
           Messages, photos, and voice notes are kept on this phone, so the chat still opens when you are offline.
         </Text>
         <PrimaryButton label="Save name" onPress={saveName} busy={saving} icon="check" />
+        <Text style={{ color: colors.muted, fontFamily: font.medium, textAlign: 'center', marginTop: 16 }}>
+          Version {Constants.expoConfig?.version || '1.0.0'}
+        </Text>
       </ScrollView>
     </KeyboardScreen>
   );

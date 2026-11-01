@@ -6,6 +6,13 @@ import { HttpError } from '../errors.js';
 const MAX_TEXT = 4000;
 const MAX_VOICE_MS = 5 * 60 * 1000;
 
+function voiceQuote(ms) {
+  const total = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = String(total % 60).padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
 export function assertMediaUrl(url) {
   let parsed;
   try {
@@ -82,7 +89,7 @@ export async function createChatMessage(user, payload, { status = 'sent' } = {})
       messageId: original._id.toString(),
       senderId: original.senderId.toString(),
       type: original.type,
-      text: original.type === 'text' ? original.text : original.type === 'image' ? 'Photo' : 'Voice message',
+      text: original.type === 'text' ? original.text : original.type === 'image' ? 'Photo' : voiceQuote(original.durationMs),
       mediaUrl: original.type === 'image' ? original.mediaUrl : '',
     };
   }
