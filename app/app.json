@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Chatbox",
+    "slug": "chatbox",
+    "scheme": "chatbox",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Chatbox uses the microphone so you can send voice messages.",
+        "NSPhotoLibraryUsageDescription": "Chatbox uses your photos so you can send pictures."
+      }
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": ["RECORD_AUDIO"],
+      "adaptiveIcon": {
+        "backgroundColor": "#075E54",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-audio",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Chatbox uses your photos so you can send pictures."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#075E54"
+        }
+      ]
+    ]
+  }
+}

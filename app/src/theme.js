@@ -1,0 +1,17 @@
+export const colors = {
+  header: '#075E54',
+  headerDeep: '#054C44',
+  teal: '#128C7E',
+  green: '#25D366',
+  outgoing: '#D9FDD3',
+  incoming: '#FFFFFF',
+  background: '#EFE7DE',
+  composer: '#F0F2F5',
+  text: '#111B21',
+  muted: '#667781',
+  line: '#E9EDEF',
+  danger: '#D32F2F',
+  white: '#FFFFFF',
+  overlay: 'rgba(11, 20, 26, 0.45)',
+  day: 'rgba(255, 255, 255, 0.92)',
+};

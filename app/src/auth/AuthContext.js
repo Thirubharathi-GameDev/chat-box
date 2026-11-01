@@ -1,0 +1,72 @@
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import { api } from '../api';
+
+const TOKEN_KEY = 'chatbox.token';
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [ready, setReady] = useState(false);
+  const [token, setToken] = useState(null);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+        if (stored) {
+          const data = await api('/api/me', { token: stored });
+          if (!cancel) {
+            setToken(stored);
+            setUser(data.user);
+          }
+        }
+      } catch {
+        await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+      } finally {
+        if (!cancel) setReady(true);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  const value = useMemo(() => {
+    async function persist(data) {
+      await SecureStore.setItemAsync(TOKEN_KEY, data.token);
+      setToken(data.token);
+      setUser(data.user);
+    }
+
+    return {
+      ready,
+      token,
+      user,
+      async login(userId, password) {
+        await persist(await api('/api/auth/login', { method: 'POST', body: { userId, password } }));
+      },
+      async register(userId, password) {
+        await persist(await api('/api/auth/register', { method: 'POST', body: { userId, password } }));
+      },
+      async saveName(displayName) {
+        const data = await api('/api/me', { token, method: 'PATCH', body: { displayName } });
+        setUser(data.user);
+      },
+      async logout() {
+        await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+        setToken(null);
+        setUser(null);
+      },
+    };
+  }, [ready, token, user]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const value = useContext(AuthContext);
+  if (!value) throw new Error('useAuth must be used inside AuthProvider');
+  return value;
+}
