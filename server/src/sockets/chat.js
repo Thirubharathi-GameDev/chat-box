@@ -15,7 +15,8 @@ let io;
 
 function cleanReaction(value) {
   const emoji = String(value || '').trim();
-  if (!emoji || emoji.length > 16 || /[a-z0-9]/i.test(emoji)) return '';
+  if (!emoji || emoji.length > 32 || /[a-z]/i.test(emoji)) return '';
+  if (!/[^\u0000-\u007f]/.test(emoji)) return '';
   return emoji;
 }
 
