@@ -83,7 +83,7 @@ conversationRouter.get(
     if (!conversation) throw new HttpError(404, 'Chat not found.');
 
     const parsedLimit = Number.parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 50) : 30;
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50;
     const query = { conversationId: conversation._id, hiddenFor: { $ne: req.user._id } };
 
     if (req.query.before) {

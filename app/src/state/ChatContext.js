@@ -58,7 +58,7 @@ export function ChatProvider({ children }) {
       .catch(() => {
         if (cancel) return;
         loadConversation(user.id).then((cached) => {
-          if (!cancel && !cached) setConversation(null);
+          if (!cancel && cached) setConversation(cached);
         });
       })
       .finally(() => {

@@ -108,22 +108,32 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
     setLevels(samplesRef.current.slice(-32));
   }, [recording, recorderState.durationMillis, recorderState.isRecording, recorderState.metering]);
 
+  const sendingText = useRef(false);
+  const sendingVoice = useRef(false);
+
   async function sendText() {
-    const value = text.trim();
-    if (!value || disabled) return;
-    if (editing?.id) {
+    if (sendingText.current || disabled) return;
+    const value = String(textRef.current || '').trim();
+    if (!value) return;
+    sendingText.current = true;
+    try {
+      if (editing?.id) {
+        dirty.current = true;
+        setText(draft || '');
+        onTyping?.(false);
+        onSubmitEdit?.(editing.id, value);
+        return;
+      }
       dirty.current = true;
-      setText(draft || '');
+      setText('');
+      textRef.current = '';
+      onDraft?.('');
+      setEmojiOpen(false);
       onTyping?.(false);
-      onSubmitEdit?.(editing.id, value);
-      return;
+      await onSendText(value);
+    } finally {
+      sendingText.current = false;
     }
-    dirty.current = true;
-    setText('');
-    onDraft?.('');
-    setEmojiOpen(false);
-    onTyping?.(false);
-    await onSendText(value);
   }
 
   function withTimeout(promise, ms) {
@@ -255,8 +265,13 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
       setLevels([]);
       releaseKeyboard();
     }
-    if (cancelled || durationMs < 700 || !uri) return;
-    await onVoice(uri, durationMs, waveform);
+    if (cancelled || durationMs < 700 || !uri || sendingVoice.current) return;
+    sendingVoice.current = true;
+    try {
+      await onVoice(uri, durationMs, waveform);
+    } finally {
+      sendingVoice.current = false;
+    }
   }
 
   function holdKeyboard() {

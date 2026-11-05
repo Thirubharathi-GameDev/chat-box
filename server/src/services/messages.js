@@ -94,25 +94,48 @@ export async function createChatMessage(user, payload, { status = 'sent' } = {})
     };
   }
 
-  const message = await Message.create({
-    conversationId: conversation._id,
-    senderId: user._id,
-    type,
-    text,
-    mediaUrl,
-    durationMs,
-    waveform,
-    status,
-    ...(replyTo ? { replyTo } : {}),
-  });
+  const clientId = typeof payload.clientId === 'string' ? payload.clientId.trim().slice(0, 80) : '';
+  if (clientId) {
+    const existing = await Message.findOne({
+      conversationId: conversation._id,
+      senderId: user._id,
+      clientId,
+    });
+    if (existing) return { message: existing, conversation };
+  }
 
-  conversation.lastMessage = {
-    text,
-    type,
-    senderId: user._id,
-    createdAt: message.createdAt,
-  };
-  await conversation.save();
+  try {
+    const message = await Message.create({
+      conversationId: conversation._id,
+      senderId: user._id,
+      ...(clientId ? { clientId } : {}),
+      type,
+      text,
+      mediaUrl,
+      durationMs,
+      waveform,
+      status,
+      ...(replyTo ? { replyTo } : {}),
+    });
 
-  return { message, conversation };
+    conversation.lastMessage = {
+      text,
+      type,
+      senderId: user._id,
+      createdAt: message.createdAt,
+    };
+    await conversation.save();
+
+    return { message, conversation };
+  } catch (err) {
+    if (clientId && err?.code === 11000) {
+      const existing = await Message.findOne({
+        conversationId: conversation._id,
+        senderId: user._id,
+        clientId,
+      });
+      if (existing) return { message: existing, conversation };
+    }
+    throw err;
+  }
 }

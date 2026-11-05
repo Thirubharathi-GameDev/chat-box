@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -5,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, uploadMedia } from '../api';
-import { applyMarks, displayUri, loadMarks, loadMessages, mergeWithLocal, persistMedia, saveMarks, saveMessages, warmMedia } from '../cache';
+import { applyMarks, displayUri, loadMarks, loadMessages, localMediaUri, mergeWithLocal, persistMedia, saveMarks, saveMessages, warmMedia } from '../cache';
 import { useAuth } from '../auth/AuthContext';
 import { Avatar } from '../components/Avatar';
 import { Composer } from '../components/Composer';
@@ -25,8 +26,7 @@ function clientId() {
 }
 
 function localVoiceUri(message) {
-  const candidates = [message?.localPath, message?.local?.uri, message?.mediaUrl];
-  return candidates.find((value) => value && !/^https?:/i.test(value)) || '';
+  return localMediaUri(message);
 }
 
 function patchVoiceReply(message, all) {
@@ -70,6 +70,7 @@ export function ChatScreen({ navigation, route }) {
   const statusFloor = useRef(new Map());
   const messagesRef = useRef([]);
   const flushing = useRef(false);
+  const sendingIds = useRef(new Set());
   const deliverRef = useRef(null);
   const flushRef = useRef(async () => {});
   const marksRef = useRef({ hidden: [], starred: [], unstarred: [] });
@@ -77,8 +78,11 @@ export function ChatScreen({ navigation, route }) {
   const [held, setHeld] = useState(null);
   const [editing, setEditing] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
+  const [stickyDate, setStickyDate] = useState('');
+  const [showJump, setShowJump] = useState(false);
   const draftText = useRef(draft.text || '');
   const draftApplied = useRef(false);
+  const seededFocus = useRef('');
 
   const conversationId = conversation?.id;
   messagesRef.current = messages;
@@ -95,20 +99,36 @@ export function ChatScreen({ navigation, route }) {
 
   const upsert = useCallback((message, pendingId) => {
     const nextMessage = keepStatus(message);
+    const dropClient = pendingId || nextMessage.clientId || '';
     setMessages((prev) => {
-      const stripped = pendingId ? prev.filter((item) => item.clientId !== pendingId) : prev;
-      const previous = nextMessage.id ? stripped.find((item) => item.id === nextMessage.id) : null;
+      const withoutPending = dropClient
+        ? prev.filter((item) => !(item.clientId === dropClient && !item.id))
+        : prev;
+      const previous =
+        (nextMessage.id && withoutPending.find((item) => item.id === nextMessage.id)) ||
+        (nextMessage.clientId && withoutPending.find((item) => item.clientId === nextMessage.clientId)) ||
+        null;
       const mergedBase = previous && (STATUS_RANK[previous.status] || 0) > (STATUS_RANK[nextMessage.status] || 0)
         ? { ...nextMessage, status: previous.status }
         : nextMessage;
       const merged = {
         ...mergedBase,
+        clientId: mergedBase.clientId || previous?.clientId || dropClient || '',
         localPath: mergedBase.localPath || previous?.localPath || '',
         starred: previous ? Boolean(previous.starred) : Boolean(mergedBase.starred),
         reactions: mergedBase.reactions?.length ? mergedBase.reactions : previous?.reactions || mergedBase.reactions || [],
+        pending: false,
+        waiting: false,
+        failed: false,
+        local: null,
       };
-      if (previous) return stripped.map((item) => (item.id === merged.id ? merged : item));
-      return [...stripped, merged];
+      if (previous?.id) {
+        return withoutPending.map((item) => (item.id === previous.id ? merged : item));
+      }
+      if (previous?.clientId) {
+        return withoutPending.map((item) => (item.clientId === previous.clientId ? merged : item));
+      }
+      return [...withoutPending, merged];
     });
   }, [keepStatus]);
 
@@ -117,13 +137,15 @@ export function ChatScreen({ navigation, route }) {
     let cancel = false;
     allowOlder.current = false;
     setLoading(true);
+    setShowJump(false);
+    setStickyDate('');
     Promise.all([loadMessages(user.id, conversationId), loadMarks(user.id, conversationId)]).then(([cached, marks]) => {
       marksRef.current = marks;
       if (cancel || !cached.length) return;
       setMessages(applyMarks(cached, marks));
       setLoading(false);
     });
-    api(`/api/conversation/${conversationId}/messages?limit=30`, { token })
+    api(`/api/conversation/${conversationId}/messages?limit=100`, { token })
       .then(async (data) => {
         if (cancel) return;
         const [cached, marks] = await Promise.all([
@@ -158,6 +180,19 @@ export function ChatScreen({ navigation, route }) {
       cancel = true;
     };
   }, [conversationId, token, user?.id]);
+
+  useEffect(() => {
+    const seed = route.params?.seedMessage;
+    const focusId = route.params?.focusId || seed?.id;
+    if (!seed?.id || !focusId || seededFocus.current === focusId) return;
+    seededFocus.current = focusId;
+    setMessages((prev) => {
+      if (prev.some((item) => item.id === seed.id)) return prev;
+      return [...prev, { ...seed, pending: false, waiting: false, failed: false }].sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+      );
+    });
+  }, [route.params?.focusId, route.params?.seedMessage]);
 
   useEffect(() => {
     if (!socket) return undefined;
@@ -368,7 +403,7 @@ export function ChatScreen({ navigation, route }) {
     try {
       const oldest = messages[0].createdAt;
       const data = await api(
-        `/api/conversation/${conversationId}/messages?limit=30&before=${encodeURIComponent(oldest)}`,
+        `/api/conversation/${conversationId}/messages?limit=50&before=${encodeURIComponent(oldest)}`,
         { token }
       );
       const older = applyMarks(
@@ -413,7 +448,9 @@ export function ChatScreen({ navigation, route }) {
       }, 220);
       setTimeout(() => setHighlightId((current) => (current === id ? null : current)), 1800);
       setFocusTarget(null);
-      if (route.params?.focusId) navigation.setParams({ focusId: undefined });
+      if (route.params?.focusId || route.params?.seedMessage) {
+        navigation.setParams({ focusId: undefined, seedMessage: undefined });
+      }
       return undefined;
     }
     if (hasMore && focusTries.current < 8) {
@@ -422,9 +459,31 @@ export function ChatScreen({ navigation, route }) {
       return undefined;
     }
     setFocusTarget(null);
-    if (route.params?.focusId) navigation.setParams({ focusId: undefined });
+    if (route.params?.focusId || route.params?.seedMessage) {
+      navigation.setParams({ focusId: undefined, seedMessage: undefined });
+    }
     return undefined;
   }, [focusTarget, route.params?.focusId, loading, feed, hasMore, navigation]);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+    const visible = viewableItems.filter((item) => item?.item?.kind === 'message');
+    if (!visible.length) return;
+    const top = visible[visible.length - 1]?.item?.message;
+    if (!top?.createdAt) return;
+    setStickyDate(dayLabel(top.createdAt));
+  }).current;
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 12 }).current;
+
+  function onChatScroll(event) {
+    const offset = event.nativeEvent.contentOffset.y;
+    setShowJump(offset > 140);
+  }
+
+  function jumpToLatest() {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setShowJump(false);
+  }
 
   function markFailed(pendingId, local) {
     setMessages((prev) =>
@@ -485,6 +544,11 @@ export function ChatScreen({ navigation, route }) {
   }
 
   async function sendPayload(local, pendingId = clientId(), { quiet = false } = {}) {
+    if (sendingIds.current.has(pendingId)) return 'busy';
+    sendingIds.current.add(pendingId);
+    if (local.type === 'text') {
+      local = { ...local, text: String(local.text || '') };
+    }
     if (local.type === 'voice' && local.uri && !/^https?:/i.test(local.uri)) {
       const saved = await persistMedia(local.uri, pendingId, 'voice');
       if (saved) local = { ...local, uri: saved };
@@ -555,7 +619,7 @@ export function ChatScreen({ navigation, route }) {
         const localPath = await persistMedia(local.uri, saved.id, local.type);
         if (localPath) saved = { ...saved, localPath };
       }
-      upsert(saved, pendingId);
+      upsert({ ...saved, clientId: pendingId }, pendingId);
       return 'sent';
     } catch (err) {
       if (isOffline(err)) {
@@ -566,6 +630,8 @@ export function ChatScreen({ navigation, route }) {
       markFailed(pendingId, local);
       if (!quiet) Alert.alert('Message', err.message);
       return 'failed';
+    } finally {
+      sendingIds.current.delete(pendingId);
     }
   }
 
@@ -573,13 +639,15 @@ export function ChatScreen({ navigation, route }) {
   flushRef.current = async () => {
     if (flushing.current || !socket?.connected) return;
     const queued = messagesRef.current
-      .filter((item) => item.waiting && item.local)
+      .filter((item) => item.waiting && item.local && item.clientId && !sendingIds.current.has(item.clientId))
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
     if (!queued.length) return;
     flushing.current = true;
     try {
       for (const item of queued) {
         if (!socket.connected) break;
+        if (sendingIds.current.has(item.clientId)) continue;
+        if (messagesRef.current.some((row) => row.clientId === item.clientId && row.id)) continue;
         const result = await deliverRef.current(item.local, item.clientId, { quiet: true });
         if (result === 'offline') break;
       }
@@ -774,6 +842,36 @@ export function ChatScreen({ navigation, route }) {
     if (message?.text) Clipboard.setStringAsync(message.text);
   }
 
+  function resendHeld() {
+    const message = held;
+    setHeld(null);
+    if (!message || message.deleted) return;
+    if (message.type === 'text') {
+      if (!message.text?.trim()) return;
+      sendPayload({ type: 'text', text: message.text });
+      return;
+    }
+    if (message.type === 'image') {
+      const uri = displayUri(message) || message.mediaUrl;
+      if (!uri) return;
+      const mediaUrl = /^https?:/i.test(message.mediaUrl || '') ? message.mediaUrl : '';
+      sendPayload({ type: 'image', uri, mediaUrl });
+      return;
+    }
+    if (message.type === 'voice') {
+      const uri = localVoiceUri(message) || message.mediaUrl;
+      if (!uri) return;
+      const mediaUrl = /^https?:/i.test(message.mediaUrl || '') ? message.mediaUrl : '';
+      sendPayload({
+        type: 'voice',
+        uri,
+        mediaUrl,
+        durationMs: message.durationMs || 0,
+        waveform: message.waveform || [],
+      });
+    }
+  }
+
   function starHeld() {
     const message = held;
     setHeld(null);
@@ -901,55 +999,71 @@ export function ChatScreen({ navigation, route }) {
           <ActivityIndicator color={colors.teal} />
         </View>
       ) : (
-        <FlatList
-          ref={listRef}
-          style={styles.flex}
-          inverted
-          onScrollToIndexFailed={(info) => {
-            setTimeout(() => {
-              listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
-            }, 120);
-          }}
-          data={feed}
-          keyExtractor={(item) => item.key}
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          onEndReached={loadOlder}
-          onEndReachedThreshold={0.2}
-          renderItem={({ item }) =>
-            item.kind === 'day' ? (
-              <View style={styles.dayWrap}>
-                <Text style={styles.day}>{item.label}</Text>
-              </View>
-            ) : (
-              <MessageBubble
-                message={patchVoiceReply(item.message, messages)}
-                mine={item.message.senderId === user.id}
-                myId={user.id}
-                partnerName={title}
-                playing={playingId === (item.message.id || item.message.clientId)}
-                progress={
-                  playingId === (item.message.id || item.message.clientId) ||
-                  pausedId === (item.message.id || item.message.clientId)
-                    ? playProgress
-                    : 0
-                }
-                onToggleVoice={toggleVoice}
-                onSeekVoice={seekVoice}
-                onDownloadVoice={(message) => downloadVoice(message, true)}
-                voiceReady={item.message.type !== 'voice' || Boolean(localVoiceUri(item.message))}
-                voiceDownloading={Boolean(item.message.id && voiceBusy[item.message.id])}
-                onToggleSpeaker={switchSpeaker}
-                onOpenImage={setViewer}
-                onReply={startReply}
-                onJump={focusMessage}
-                onHold={setHeld}
-                highlight={highlightId === item.message.id}
-                onRetry={() => item.message.local && sendPayload(item.message.local, item.message.clientId)}
-              />
-            )
-          }
-        />
+        <View style={styles.chatPane}>
+          <FlatList
+            ref={listRef}
+            style={styles.flex}
+            inverted
+            onScroll={onChatScroll}
+            scrollEventThrottle={64}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              }, 120);
+            }}
+            data={feed}
+            keyExtractor={(item) => item.key}
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+            onEndReached={loadOlder}
+            onEndReachedThreshold={0.2}
+            renderItem={({ item }) =>
+              item.kind === 'day' ? (
+                <View style={styles.dayWrap}>
+                  <Text style={styles.day}>{item.label}</Text>
+                </View>
+              ) : (
+                <MessageBubble
+                  message={patchVoiceReply(item.message, messages)}
+                  mine={item.message.senderId === user.id}
+                  myId={user.id}
+                  partnerName={title}
+                  playing={playingId === (item.message.id || item.message.clientId)}
+                  progress={
+                    playingId === (item.message.id || item.message.clientId) ||
+                    pausedId === (item.message.id || item.message.clientId)
+                      ? playProgress
+                      : 0
+                  }
+                  onToggleVoice={toggleVoice}
+                  onSeekVoice={seekVoice}
+                  onDownloadVoice={(message) => downloadVoice(message, true)}
+                  voiceReady={item.message.type !== 'voice' || Boolean(localVoiceUri(item.message))}
+                  voiceDownloading={Boolean(item.message.id && voiceBusy[item.message.id])}
+                  onToggleSpeaker={switchSpeaker}
+                  onOpenImage={setViewer}
+                  onReply={startReply}
+                  onJump={focusMessage}
+                  onHold={setHeld}
+                  highlight={highlightId === item.message.id}
+                  onRetry={() => item.message.local && sendPayload(item.message.local, item.message.clientId)}
+                />
+              )
+            }
+          />
+          {showJump && stickyDate ? (
+            <View pointerEvents="none" style={styles.stickyDate}>
+              <Text style={styles.day}>{stickyDate}</Text>
+            </View>
+          ) : null}
+          {showJump ? (
+            <Pressable style={styles.jump} onPress={jumpToLatest} hitSlop={8}>
+              <Ionicons name="chevron-down" size={22} color={colors.header} />
+            </Pressable>
+          ) : null}
+        </View>
       )}
       {!loading && messages.length === 0 ? <Text style={styles.hello}>Say hello.</Text> : null}
       <View>
@@ -981,6 +1095,7 @@ export function ChatScreen({ navigation, route }) {
         onCopy={copyHeld}
         onEdit={editHeld}
         onStar={starHeld}
+        onResend={resendHeld}
         onDelete={deleteHeld}
       />
       <Modal visible={Boolean(viewer)} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
@@ -1004,6 +1119,9 @@ function makeChatStyles(colors) {
     color: '#B7F7C8',
   },
   flex: {
+    flex: 1,
+  },
+  chatPane: {
     flex: 1,
   },
   center: {
@@ -1032,6 +1150,29 @@ function makeChatStyles(colors) {
     paddingVertical: 4,
     fontSize: 12,
     fontFamily: font.bold,
+  },
+  stickyDate: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    zIndex: 2,
+  },
+  jump: {
+    position: 'absolute',
+    right: 14,
+    bottom: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    zIndex: 2,
   },
   hello: {
     position: 'absolute',

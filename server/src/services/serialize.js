@@ -32,6 +32,7 @@ export function publicMessage(message, viewerId = '') {
     id: message._id.toString(),
     conversationId: message.conversationId.toString(),
     senderId: message.senderId.toString(),
+    clientId: message.clientId || '',
     type: message.type,
     text: deleted ? '' : message.text || '',
     mediaUrl: deleted ? '' : message.mediaUrl || '',

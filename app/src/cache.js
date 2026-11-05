@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 
-const LIMIT = 300;
+const LIMIT = 5000;
 
 function messageKey(userId, conversationId) {
   return `chatbox.messages.${userId}.${conversationId}`;
@@ -9,6 +9,10 @@ function messageKey(userId, conversationId) {
 
 function conversationKey(userId) {
   return `chatbox.conversation.${userId}`;
+}
+
+function userKey() {
+  return 'chatbox.user';
 }
 
 function draftKey(userId, conversationId) {
@@ -29,6 +33,11 @@ export function displayUri(message) {
   return message?.localPath || message?.mediaUrl || '';
 }
 
+export function localMediaUri(message) {
+  const candidates = [message?.localPath, message?.local?.uri];
+  return candidates.find((value) => value && !/^https?:/i.test(value)) || '';
+}
+
 export async function loadMessages(userId, conversationId) {
   try {
     const raw = await AsyncStorage.getItem(messageKey(userId, conversationId));
@@ -45,32 +54,44 @@ export async function loadMessages(userId, conversationId) {
   }
 }
 
+function slimMessage(message) {
+  return {
+    id: message.id,
+    clientId: message.clientId,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    type: message.type,
+    text: message.text || '',
+    mediaUrl: message.mediaUrl || '',
+    localPath: message.localPath || '',
+    durationMs: message.durationMs || 0,
+    waveform: Array.isArray(message.waveform) ? message.waveform : [],
+    status: message.status || 'sent',
+    replyTo: message.replyTo || null,
+    reactions: Array.isArray(message.reactions) ? message.reactions : [],
+    starred: Boolean(message.starred),
+    createdAt: message.createdAt,
+    pending: Boolean(message.pending),
+    waiting: Boolean(message.waiting),
+    failed: Boolean(message.failed),
+    edited: Boolean(message.edited),
+    deleted: Boolean(message.deleted),
+    removedForSender: Boolean(message.removedForSender),
+    local: message.local || null,
+  };
+}
+
 export async function saveMessages(userId, conversationId, messages) {
   try {
-    const slim = messages.slice(-LIMIT).map((message) => ({
-      id: message.id,
-      clientId: message.clientId,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      type: message.type,
-      text: message.text || '',
-      mediaUrl: message.mediaUrl || '',
-      localPath: message.localPath || '',
-      durationMs: message.durationMs || 0,
-      waveform: Array.isArray(message.waveform) ? message.waveform : [],
-      status: message.status || 'sent',
-      replyTo: message.replyTo || null,
-      reactions: Array.isArray(message.reactions) ? message.reactions : [],
-      starred: Boolean(message.starred),
-      createdAt: message.createdAt,
-      pending: Boolean(message.pending),
-      waiting: Boolean(message.waiting),
-      failed: Boolean(message.failed),
-      edited: Boolean(message.edited),
-      deleted: Boolean(message.deleted),
-      removedForSender: Boolean(message.removedForSender),
-      local: message.local || null,
-    }));
+    const byKey = new Map();
+    messages.forEach((message) => {
+      const key = message.id || message.clientId;
+      if (!key) return;
+      byKey.set(key, slimMessage(message));
+    });
+    const slim = [...byKey.values()]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      .slice(-LIMIT);
     await AsyncStorage.setItem(messageKey(userId, conversationId), JSON.stringify(slim));
   } catch {
     // The chat still works from memory if the phone is out of space.
@@ -78,18 +99,52 @@ export async function saveMessages(userId, conversationId, messages) {
 }
 
 export function mergeWithLocal(cached, incoming) {
+  const byId = new Map();
+  const byClient = new Map();
   const locals = new Map();
-  const unsent = [];
-  cached.forEach((message) => {
+
+  function remember(message) {
+    if (!message) return;
+    if (message.id) byId.set(message.id, message);
+    if (message.clientId) byClient.set(message.clientId, message);
     const key = message.id || message.clientId;
     if (key && message.localPath) locals.set(key, message.localPath);
-    if (!message.id && message.local && (message.waiting || message.pending || message.failed)) unsent.push(message);
+  }
+
+  (cached || []).forEach(remember);
+  (incoming || []).forEach((message) => {
+    const previous =
+      (message.id && byId.get(message.id)) ||
+      (message.clientId && byClient.get(message.clientId)) ||
+      null;
+    remember({
+      ...previous,
+      ...message,
+      localPath: message.localPath || previous?.localPath || locals.get(message.id) || locals.get(message.clientId) || '',
+      local: previous?.local || message.local || null,
+      pending: false,
+      waiting: false,
+      failed: false,
+    });
   });
-  const merged = incoming.map((message) => ({
-    ...message,
-    localPath: message.localPath || locals.get(message.id) || '',
-  }));
-  return [...merged, ...unsent].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+  const unsent = (cached || []).filter(
+    (message) => !message.id && message.local && (message.waiting || message.pending || message.failed)
+  );
+  unsent.forEach((message) => {
+    if (message.clientId && byId.has(message.id)) return;
+    if (message.clientId && byClient.has(message.clientId) && byClient.get(message.clientId)?.id) return;
+    remember(message);
+  });
+
+  const merged = [...byId.values()];
+  byClient.forEach((message, clientId) => {
+    if (message.id) return;
+    if (merged.some((item) => item.clientId === clientId)) return;
+    merged.push(message);
+  });
+
+  return merged.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 }
 
 export async function loadConversation(userId) {
@@ -98,6 +153,27 @@ export async function loadConversation(userId) {
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
+  }
+}
+
+export async function loadCachedUser() {
+  try {
+    const raw = await AsyncStorage.getItem(userKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCachedUser(user) {
+  try {
+    if (!user) {
+      await AsyncStorage.removeItem(userKey());
+      return;
+    }
+    await AsyncStorage.setItem(userKey(), JSON.stringify(user));
+  } catch {
+    // The signed-in session still lives in memory.
   }
 }
 
@@ -139,6 +215,7 @@ export async function saveConversation(userId, conversation) {
 
 export async function persistMedia(sourceUri, id, type) {
   if (!sourceUri || !id) return '';
+  if (type === 'image') return '';
   const ext = type === 'voice' ? 'm4a' : 'jpg';
   const dest = new File(mediaDir(), `${id}.${ext}`);
   if (dest.exists) return dest.uri;
@@ -198,11 +275,11 @@ export function applyMarks(messages, marks) {
 export async function warmMedia(messages) {
   const next = [];
   for (const message of messages) {
-    if (message.type !== 'image' || message.localPath || !message.mediaUrl || !message.id) {
+    if (message.type !== 'voice' || message.localPath || !message.mediaUrl || !message.id) {
       next.push(message);
       continue;
     }
-    const localPath = await persistMedia(message.mediaUrl, message.id, message.type);
+    const localPath = await persistMedia(message.mediaUrl, message.id, 'voice');
     next.push(localPath ? { ...message, localPath } : message);
   }
   return next;

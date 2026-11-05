@@ -1,5 +1,21 @@
 import { getApiUrl } from './config';
 
+export class ApiError extends Error {
+  constructor(message, status = 0) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export function isOfflineError(error) {
+  if (!error) return false;
+  if (error.status === 0) return true;
+  return /reach the server|network|failed to fetch|not connected|offline|timeout|internet/i.test(
+    String(error.message || '')
+  );
+}
+
 export async function api(path, { token, method = 'GET', body, form } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -16,12 +32,12 @@ export async function api(path, { token, method = 'GET', body, form } = {}) {
   try {
     response = await fetch(`${getApiUrl()}${path}`, { method, headers, body: payload });
   } catch {
-    throw new Error('Can’t reach the server. Use the same Wi-Fi and check that it is running.');
+    throw new ApiError('Can’t reach the server. Use the same Wi-Fi and check that it is running.', 0);
   }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || 'Something went wrong.');
+    throw new ApiError(data.error || 'Something went wrong.', response.status);
   }
   return data;
 }

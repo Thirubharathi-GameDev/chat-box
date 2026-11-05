@@ -8,6 +8,7 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    clientId: { type: String, default: '' },
     type: { type: String, enum: ['text', 'image', 'voice'], required: true },
     text: { type: String, default: '' },
     mediaUrl: { type: String, default: '' },
@@ -40,5 +41,9 @@ const messageSchema = new mongoose.Schema(
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index(
+  { conversationId: 1, senderId: 1, clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $type: 'string', $gt: '' } } }
+);
 
 export const Message = mongoose.model('Message', messageSchema);

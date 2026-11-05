@@ -8,7 +8,7 @@ import { EmojiPanel } from './EmojiPanel';
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
-export function MessageActions({ message, myId, onClose, onReact, onCopy, onStar, onEdit, onDelete }) {
+export function MessageActions({ message, myId, onClose, onReact, onCopy, onStar, onEdit, onResend, onDelete }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -29,6 +29,7 @@ export function MessageActions({ message, myId, onClose, onReact, onCopy, onStar
 
   if (!message) return null;
   const canCopy = message.type === 'text' && Boolean(message.text) && !message.deleted;
+  const canResend = !message.deleted && (message.type === 'text' ? Boolean(message.text) : Boolean(message.mediaUrl || message.localPath || message.local?.uri));
   const saved = Boolean(message.id) && !message.deleted;
   const canEdit = saved
     && message.senderId === myId
@@ -71,6 +72,12 @@ export function MessageActions({ message, myId, onClose, onReact, onCopy, onStar
             <Pressable style={styles.row} onPress={onStar}>
               <Ionicons name={message.starred ? 'star' : 'star-outline'} size={20} color={colors.text} />
               <Text style={styles.label}>{message.starred ? 'Unstar' : 'Star'}</Text>
+            </Pressable>
+          ) : null}
+          {canResend ? (
+            <Pressable style={styles.row} onPress={onResend}>
+              <Ionicons name="arrow-redo-outline" size={20} color={colors.text} />
+              <Text style={styles.label}>Resend</Text>
             </Pressable>
           ) : null}
           <Pressable style={styles.row} onPress={onDelete}>
