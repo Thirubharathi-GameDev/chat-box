@@ -77,13 +77,28 @@ export function ChatProvider({ children }) {
       return undefined;
     }
 
-    const next = io(getApiUrl(), { auth: { token } });
+    const next = io(getApiUrl(), {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 4000,
+      timeout: 12000,
+    });
     setSocket(next);
+    const liveOnline = { current: null };
 
     const onConnect = () => {
       setConnected(true);
       next.emit('app:foreground', { active: AppState.currentState === 'active' });
     };
+
+    function newerSeen(a, b) {
+      if (!a) return b || null;
+      if (!b) return a;
+      return new Date(a) >= new Date(b) ? a : b;
+    }
     const onAppState = (state) => {
       if (next.connected) next.emit('app:foreground', { active: state === 'active' });
     };
@@ -98,14 +113,22 @@ export function ChatProvider({ children }) {
         .then((data) => {
           setConversation((current) => {
             if (!data.conversation) return null;
-            const next = data.conversation;
-            if (!current) return next;
+            const remote = data.conversation;
+            if (!current) {
+              return {
+                ...remote,
+                partner: {
+                  ...remote.partner,
+                  online: liveOnline.current === null ? remote.partner.online : liveOnline.current,
+                },
+              };
+            }
             return {
-              ...next,
+              ...remote,
               partner: {
-                ...next.partner,
-                online: current.partner?.online ?? next.partner.online,
-                lastSeenAt: current.partner?.lastSeenAt || next.partner.lastSeenAt,
+                ...remote.partner,
+                online: liveOnline.current === null ? Boolean(remote.partner.online) : liveOnline.current,
+                lastSeenAt: newerSeen(current.partner?.lastSeenAt, remote.partner.lastSeenAt),
               },
             };
           });
@@ -121,14 +144,17 @@ export function ChatProvider({ children }) {
       refreshConversation();
     };
     const onPresence = (payload) => {
+      liveOnline.current = Boolean(payload.online);
       setConversation((current) => {
         if (!current || current.partner?.id !== payload.userId) return current;
         return {
           ...current,
           partner: {
             ...current.partner,
-            online: Boolean(payload.online),
-            lastSeenAt: payload.lastSeenAt || null,
+            online: liveOnline.current,
+            lastSeenAt: payload.online
+              ? current.partner.lastSeenAt
+              : payload.lastSeenAt || current.partner.lastSeenAt || null,
           },
         };
       });
@@ -152,7 +178,17 @@ export function ChatProvider({ children }) {
       const nextActivity = payload.active ? (payload.kind === 'recording' ? 'recording' : 'typing') : '';
       setPartnerActivity(nextActivity);
       clearTimeout(typingTimer);
-      if (nextActivity) typingTimer = setTimeout(() => setPartnerActivity(''), 4000);
+      if (nextActivity) {
+        liveOnline.current = true;
+        setConversation((current) => {
+          if (!current || current.partner?.online) return current;
+          return {
+            ...current,
+            partner: { ...current.partner, online: true },
+          };
+        });
+        typingTimer = setTimeout(() => setPartnerActivity(''), 6000);
+      }
     };
 
     next.on('connect', onConnect);
@@ -253,12 +289,18 @@ export function ChatProvider({ children }) {
           return;
         }
         setConversation((current) => {
+          const remote = data.conversation;
           const next = {
-            ...data.conversation,
+            ...remote,
             partner: {
-              ...data.conversation.partner,
-              online: current?.partner?.online ?? data.conversation.partner.online,
-              lastSeenAt: current?.partner?.lastSeenAt || data.conversation.partner.lastSeenAt,
+              ...remote.partner,
+              online: current?.partner?.online || remote.partner.online,
+              lastSeenAt:
+                current?.partner?.lastSeenAt && remote.partner.lastSeenAt
+                  ? new Date(current.partner.lastSeenAt) >= new Date(remote.partner.lastSeenAt)
+                    ? current.partner.lastSeenAt
+                    : remote.partner.lastSeenAt
+                  : current?.partner?.lastSeenAt || remote.partner.lastSeenAt,
             },
           };
           if (user?.id) saveConversation(user.id, next);

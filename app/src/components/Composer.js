@@ -109,7 +109,6 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
   }, [recording, recorderState.durationMillis, recorderState.isRecording, recorderState.metering]);
 
   const sendingText = useRef(false);
-  const sendingVoice = useRef(false);
 
   async function sendText() {
     if (sendingText.current || disabled) return;
@@ -265,13 +264,9 @@ export function Composer({ onSendText, onPickImage, onVoice, onTyping, onRecordi
       setLevels([]);
       releaseKeyboard();
     }
-    if (cancelled || durationMs < 700 || !uri || sendingVoice.current) return;
-    sendingVoice.current = true;
-    try {
-      await onVoice(uri, durationMs, waveform);
-    } finally {
-      sendingVoice.current = false;
-    }
+    if (cancelled || durationMs < 700 || !uri) return;
+    // Hand the file off right away so the next note can record while this one uploads.
+    onVoice(uri, durationMs, waveform);
   }
 
   function holdKeyboard() {

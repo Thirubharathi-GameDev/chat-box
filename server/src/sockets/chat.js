@@ -217,10 +217,15 @@ export function attachSocket(server) {
     socket.join(userRoom(userId));
     if (socket.data.conversationId) socket.join(convRoom(socket.data.conversationId));
 
-    if (cameOnline && socket.data.conversationId) {
-      publishReceipts(userId, socket.data.conversationId, 'delivered').catch((err) => {
-        console.warn('Delivery receipt failed.', err.message);
+    if (cameOnline) {
+      broadcastPresence(userId, true).catch((err) => {
+        if (!/client was closed/i.test(err.message || '')) console.warn('Presence failed.', err.message);
       });
+      if (socket.data.conversationId) {
+        publishReceipts(userId, socket.data.conversationId, 'delivered').catch((err) => {
+          console.warn('Delivery receipt failed.', err.message);
+        });
+      }
     }
 
     socket.on('disconnect', () => {
