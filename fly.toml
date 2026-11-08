@@ -1,8 +1,12 @@
-app = "kin-chat-box"
+app = "chat-box"
 primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
 
 [http_service]
   internal_port = 8080

@@ -18,7 +18,7 @@ try {
 }
 
 const { server } = createServer();
-const port = Number(process.env.PORT) || 4000;
-server.listen(port, () => {
-  console.log(`Chat server listening on ${port}`);
+const port = Number(process.env.PORT) || 8080;
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Chat server listening on 0.0.0.0:${port}`);
 });
