@@ -5,14 +5,27 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { api } from './api';
 
+let openConversationId = '';
+
+export function setOpenConversation(conversationId) {
+  openConversationId = conversationId ? String(conversationId) : '';
+}
+
 try {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async (notification) => {
+      const data = notification?.request?.content?.data || {};
+      const viewing =
+        openConversationId &&
+        data.conversationId &&
+        String(data.conversationId) === openConversationId;
+      return {
+        shouldShowBanner: !viewing,
+        shouldShowList: !viewing,
+        shouldPlaySound: !viewing,
+        shouldSetBadge: true,
+      };
+    },
   });
 } catch {
   // Remote notifications are not available inside Expo Go.

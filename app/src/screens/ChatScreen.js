@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +19,7 @@ import { speakerOn, toggleSpeaker } from '../speaker';
 import { useChat } from '../state/ChatContext';
 import { font, useColors } from '../theme';
 import { KeyboardScreen } from '../useKeyboardInset';
-import { setAppBadge } from '../notifications';
+import { setAppBadge, setOpenConversation } from '../notifications';
 import { createVoiceController } from '../voicePlayback';
 
 function clientId() {
@@ -194,6 +195,28 @@ export function ChatScreen({ navigation, route }) {
     });
   }, [route.params?.focusId, route.params?.seedMessage]);
 
+  const pullLatest = useRef(async () => {});
+  pullLatest.current = async () => {
+    if (!conversationId || !token || !user?.id) return;
+    try {
+      const data = await api(`/api/conversation/${conversationId}/messages?limit=40`, { token });
+      const [cached, marks] = await Promise.all([
+        loadMessages(user.id, conversationId),
+        loadMarks(user.id, conversationId),
+      ]);
+      marksRef.current = marks;
+      const merged = applyMarks(mergeWithLocal(cached, data.messages), marks);
+      setMessages(merged);
+      setHasMore(Boolean(data.hasMore));
+      await saveMessages(user.id, conversationId, merged);
+      if (focused.current && socket?.connected) {
+        socket.emit('chat:open', { conversationId });
+      }
+    } catch {
+      // Keep whatever is already on screen.
+    }
+  };
+
   useEffect(() => {
     if (!socket) return undefined;
     const onMessage = ({ message, clientId: pendingId }) => {
@@ -252,22 +275,52 @@ export function ChatScreen({ navigation, route }) {
 
   useFocusEffect(
     useCallback(() => {
-      if (!socket || !conversationId) return undefined;
+      if (!conversationId) return undefined;
       focused.current = true;
+      setOpenConversation(conversationId);
       setAppBadge(0);
-      const open = () => socket.emit('chat:open', { conversationId });
+      const open = () => {
+        if (socket?.connected) socket.emit('chat:open', { conversationId });
+      };
       open();
-      socket.on('connect', open);
+      pullLatest.current();
+      const onConnect = () => {
+        open();
+        // After a drop, catch anything the live socket missed.
+        pullLatest.current();
+      };
+      socket?.on('connect', onConnect);
       const appState = AppState.addEventListener('change', (state) => {
-        if (state === 'active') open();
+        if (state !== 'active') return;
+        open();
+        pullLatest.current();
       });
+      let notify;
+      try {
+        notify = Notifications.addNotificationReceivedListener((notification) => {
+          const data = notification?.request?.content?.data || {};
+          if (data.conversationId && data.conversationId !== conversationId) return;
+          pullLatest.current();
+        });
+      } catch {
+        notify = null;
+      }
+      const syncTimer = setInterval(() => {
+        if (!focused.current) return;
+        pullLatest.current();
+      }, 12000);
       return () => {
         focused.current = false;
-        socket.off('connect', open);
+        setOpenConversation('');
+        clearInterval(syncTimer);
+        socket?.off('connect', onConnect);
         appState.remove();
+        notify?.remove();
         clearInterval(recordingPulse.current);
-        socket.emit('typing', { conversationId, active: false, kind: 'recording' });
-        socket.emit('chat:close', { conversationId });
+        if (socket?.connected) {
+          socket.emit('typing', { conversationId, active: false, kind: 'recording' });
+          socket.emit('chat:close', { conversationId });
+        }
         refreshConversation();
       };
     }, [socket, conversationId, refreshConversation])

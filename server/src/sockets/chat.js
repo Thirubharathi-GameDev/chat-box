@@ -11,6 +11,8 @@ import { previewText, publicMessage } from '../services/serialize.js';
 
 const connections = new Map();
 const viewing = new Map();
+const viewingGrace = new Map();
+const offlineGrace = new Map();
 let io;
 
 function cleanReaction(value) {
@@ -61,11 +63,30 @@ export function isUserPresent(userId) {
   return socketsFor(userId).some((socket) => socket.data.foreground);
 }
 
+function clearGrace(map, userId) {
+  const key = String(userId);
+  const timer = map.get(key);
+  if (timer) clearTimeout(timer);
+  map.delete(key);
+}
+
 function setForeground(socket, active) {
   const userId = socket.data.userId;
   const was = isUserPresent(userId);
   socket.data.foreground = Boolean(active);
-  if (!active) viewing.delete(userId);
+  if (!active) {
+    // Keep "viewing" briefly so a flaky socket does not drop live messages / spam push.
+    clearGrace(viewingGrace, userId);
+    viewingGrace.set(
+      String(userId),
+      setTimeout(() => {
+        viewing.delete(String(userId));
+        viewingGrace.delete(String(userId));
+      }, 8000)
+    );
+  } else {
+    clearGrace(viewingGrace, userId);
+  }
   const now = isUserPresent(userId);
   if (was === now) return;
   if (!now && socket.data.partnerId) {
@@ -212,6 +233,8 @@ export function attachSocket(server) {
 
   server.on('connection', (socket) => {
     const userId = socket.data.userId;
+    clearGrace(offlineGrace, userId);
+    clearGrace(viewingGrace, userId);
     const cameOnline = !isUserOnline(userId);
     addOnline(userId, socket.id);
     socket.join(userRoom(userId));
@@ -230,18 +253,25 @@ export function attachSocket(server) {
 
     socket.on('disconnect', () => {
       removeOnline(userId, socket.id);
-      if (viewing.get(userId) && !isUserOnline(userId)) viewing.delete(userId);
-      if (!isUserOnline(userId)) {
-        if (socket.data.partnerId) {
-          io.to(userRoom(socket.data.partnerId)).emit('typing', {
-            conversationId: socket.data.conversationId,
-            active: false,
+      if (isUserOnline(userId)) return;
+      clearGrace(offlineGrace, userId);
+      offlineGrace.set(
+        String(userId),
+        setTimeout(() => {
+          offlineGrace.delete(String(userId));
+          if (isUserOnline(userId)) return;
+          viewing.delete(String(userId));
+          if (socket.data.partnerId) {
+            io.to(userRoom(socket.data.partnerId)).emit('typing', {
+              conversationId: socket.data.conversationId,
+              active: false,
+            });
+          }
+          broadcastPresence(userId, false).catch((err) => {
+            if (!/client was closed/i.test(err.message || '')) console.warn('Presence failed.', err.message);
           });
-        }
-        broadcastPresence(userId, false).catch((err) => {
-          if (!/client was closed/i.test(err.message || '')) console.warn('Presence failed.', err.message);
-        });
-      }
+        }, 10000)
+      );
     });
 
     socket.on('app:foreground', ({ active } = {}) => {
@@ -250,8 +280,10 @@ export function attachSocket(server) {
 
     socket.on('chat:open', async ({ conversationId } = {}) => {
       if (!conversationId || conversationId !== socket.data.conversationId) return;
+      clearGrace(viewingGrace, userId);
+      clearGrace(offlineGrace, userId);
       setForeground(socket, true);
-      viewing.set(userId, String(conversationId));
+      viewing.set(String(userId), String(conversationId));
       try {
         await publishReceipts(userId, conversationId, 'read');
       } catch (err) {
@@ -260,7 +292,15 @@ export function attachSocket(server) {
     });
 
     socket.on('chat:close', ({ conversationId } = {}) => {
-      if (viewing.get(userId) === String(conversationId)) viewing.delete(userId);
+      if (viewing.get(String(userId)) !== String(conversationId)) return;
+      clearGrace(viewingGrace, userId);
+      viewingGrace.set(
+        String(userId),
+        setTimeout(() => {
+          if (viewing.get(String(userId)) === String(conversationId)) viewing.delete(String(userId));
+          viewingGrace.delete(String(userId));
+        }, 3000)
+      );
     });
 
     socket.on('message:read', async ({ conversationId, messageId } = {}) => {
@@ -444,10 +484,12 @@ export function attachSocket(server) {
 
         const { message, conversation } = await createChatMessage(user, payload || {}, { status });
         const body = publicMessage(message);
-        server.to(convRoom(conversation._id)).emit('message:new', {
-          message: body,
-          clientId: typeof payload?.clientId === 'string' ? payload.clientId : '',
-        });
+        const clientId = typeof payload?.clientId === 'string' ? payload.clientId : '';
+        const packet = { message: body, clientId };
+        // Send to the chat room and each user room so a flaky socket still gets the event.
+        server.to(convRoom(conversation._id)).emit('message:new', packet);
+        server.to(userRoom(user._id)).emit('message:new', packet);
+        if (partnerId) server.to(userRoom(partnerId)).emit('message:new', packet);
         reply({ ok: true, message: body });
         await notifyPartner(user, conversation, message);
       } catch (err) {
